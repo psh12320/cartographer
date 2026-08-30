@@ -1,0 +1,91 @@
+{
+  "format_version": 1,
+  "feature_names": [
+    "base_score",
+    "exact_matches",
+    "constraint_score",
+    "category_score",
+    "bm25_score",
+    "dense_score",
+    "dense_rank_score",
+    "dense_constraint_agreement",
+    "dense_category_agreement",
+    "profile_score",
+    "popularity_score"
+  ],
+  "routes": {
+    "buying": {
+      "base_score": 0.18799179978685063,
+      "exact_matches": 1.723027317753436,
+      "constraint_score": 1.31768740825877,
+      "category_score": 2.845409374692696,
+      "bm25_score": 0.5297562546794158,
+      "dense_score": 0.0,
+      "dense_rank_score": 0.0,
+      "dense_constraint_agreement": 0.0,
+      "dense_category_agreement": 0.0,
+      "profile_score": 0.5835565558879428,
+      "popularity_score": 5.57970209750522
+    },
+    "browsing": {
+      "base_score": 0.0,
+      "exact_matches": 0.0,
+      "constraint_score": 0.0,
+      "category_score": 0.0,
+      "bm25_score": 0.0,
+      "dense_score": 0.0,
+      "dense_rank_score": 0.0,
+      "dense_constraint_agreement": 0.0,
+      "dense_category_agreement": 0.0,
+      "profile_score": 0.0,
+      "popularity_score": 0.0
+    },
+    "boundary": {
+      "base_score": -0.24512192427127263,
+      "exact_matches": 0.4627611488629742,
+      "constraint_score": 1.6291009324856058,
+      "category_score": 2.274290076645389,
+      "bm25_score": -0.4895395446292723,
+      "dense_score": 0.0,
+      "dense_rank_score": 0.0,
+      "dense_constraint_agreement": 0.0,
+      "dense_category_agreement": 0.0,
+      "profile_score": 0.5336326835028831,
+      "popularity_score": 6.233134818562292
+    },
+    "override": {
+      "base_score": 0.5125302122927091,
+      "exact_matches": 1.7998415326880903,
+      "constraint_score": 0.8661786727237659,
+      "category_score": 3.037310363303361,
+      "bm25_score": -0.48810795120762496,
+      "dense_score": 0.0,
+      "dense_rank_score": 0.0,
+      "dense_constraint_agreement": 0.0,
+      "dense_category_agreement": 0.0,
+      "profile_score": -1.0237446546992002,
+      "popularity_score": 6.370871378033199
+    },
+    "default": {
+      "base_score": 0.0,
+      "exact_matches": 0.0,
+      "constraint_score": 0.0,
+      "category_score": 0.0,
+      "bm25_score": 0.0,
+      "dense_score": 0.0,
+      "dense_rank_score": 0.0,
+      "dense_constraint_agreement": 0.0,
+      "dense_category_agreement": 0.0,
+      "profile_score": 0.0,
+      "popularity_score": 0.0
+    }
+  },
+  "selection": {
+    "method": "five-fold scenario-stratified pairwise residual ranking",
+    "active_routes": ["buying", "boundary", "override"],
+    "baseline_technical_score": 0.8836655,
+    "out_of_fold_technical_score": 0.9218924,
+    "out_of_fold_gain": 0.038227,
+    "stable_folds": 5
+  }
+}

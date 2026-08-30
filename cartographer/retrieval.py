@@ -8,6 +8,7 @@ from .catalog import CatalogIndex
 from .config import AgentConfig
 from .dialog import profile_attributes
 from .models import SearchHit, SessionState
+from .ranker import LinearReranker
 from .semantic import CrossEncoderReranker, SemanticRetriever
 from .text import canonical, terms, token_overlap
 
@@ -27,6 +28,11 @@ class HybridRetriever:
         self.config = config
         self.semantic = SemanticRetriever(catalog, config)
         self.cross_encoder = CrossEncoderReranker(config.index_dir, config.enable_cross_encoder)
+        self.learned_reranker = LinearReranker(
+            config.ranker_path or config.index_dir / "ranker.json",
+            config.enable_learned_reranker,
+            config.learned_reranker_scale,
+        )
 
     def search(self, state: SessionState) -> RetrievalResult:
         signature = (
@@ -221,10 +227,12 @@ class HybridRetriever:
                     dense_score=dense_score,
                     dense_rank_score=dense_rank_score,
                     profile_score=profile_score,
+                    popularity_score=popularity,
                 )
             )
 
         hits.sort(key=lambda hit: (-hit.score, hit.parent_asin))
+        hits = self.learned_reranker.rerank(hits, state)
         if self.cross_encoder.enabled and semantic_query:
             rerank_count = min(40, len(hits))
             documents = [self.catalog.products[hit.product_index].search_text for hit in hits[:rerank_count]]

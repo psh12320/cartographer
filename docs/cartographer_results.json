@@ -1,23 +1,31 @@
 {
   "sample_count": 200,
   "hit_rate_at_10": 1.0,
-  "mrr": 0.690885,
-  "mttc": 2.18,
-  "efficiency": 0.882,
-  "recommended_technical_score": 0.883665,
+  "mrr": 0.792323,
+  "mttc": 1.89,
+  "efficiency": 0.911,
+  "recommended_technical_score": 0.919897,
   "reported_token_usage": {
     "prompt_tokens": 0,
     "completion_tokens": 0,
     "total_tokens": 0
   },
   "scenario_metrics": {
-    "boundary": {"sample_count": 10, "hit_rate_at_10": 1.0, "mrr": 0.542778, "mttc": 3.0},
-    "browsing": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.741726, "mttc": 2.075},
-    "buying": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.687991, "mttc": 1.6125},
-    "intent_override": {"sample_count": 30, "hit_rate_at_10": 1.0, "mrr": 0.612394, "mttc": 3.7}
+    "boundary": {"sample_count": 10, "hit_rate_at_10": 1.0, "mrr": 0.777778, "mttc": 2.9},
+    "browsing": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.851746, "mttc": 1.9375},
+    "buying": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.719965, "mttc": 1.075},
+    "intent_override": {"sample_count": 30, "hit_rate_at_10": 1.0, "mrr": 0.831667, "mttc": 3.6}
   },
   "command": "python -m evaluator.local_evaluator --output results.json",
   "semantic_routes_enabled": false,
+  "learned_reranker_enabled": true,
+  "deterministic_result_sha256": "B780D2880479F7ECF64B817FF06614A045FB2641135B45A59E5CF8DAAE45E21D",
+  "out_of_fold_validation": {
+    "baseline_technical_score": 0.8836655,
+    "technical_score": 0.9218924,
+    "gain": 0.038227,
+    "stable_folds": 5
+  },
   "protected_checkpoint": {
     "git_tag": "checkpoint-0.865767",
     "recommended_technical_score": 0.865767

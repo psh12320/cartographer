@@ -1,15 +1,24 @@
 {
-  "diagnostic_sample_count": 20,
-  "agent_turn_count": 48,
-  "initialization_plus_evaluation_seconds": 47.889,
+  "diagnostic_sample_count": 40,
+  "agent_turn_count": 76,
+  "initialization_seconds": 51.514,
+  "evaluation_seconds": 24.156,
   "latency_ms": {
-    "mean": 256.262,
-    "p50": 254.715,
-    "p95": 562.459,
-    "max": 754.542
+    "mean": 317.113,
+    "p50": 278.991,
+    "p95": 571.942,
+    "max": 770.988
   },
+  "allocation_tracing_enabled_for_latency": false,
+  "separate_traced_python_peak_memory_mib": 197.577,
   "observed_full_process_working_set_mib_upper_bound": 461,
   "reported_tokens": 0,
+  "learned_reranker": {
+    "enabled_in_frozen_config": true,
+    "out_of_fold_gain": 0.038227,
+    "stable_folds": 5,
+    "maximum_cross_validation_fold_p95_ms": 590.589
+  },
   "bge_gate": {
     "model_assets_verified": true,
     "first_batch_documents": 128,

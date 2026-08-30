@@ -51,7 +51,17 @@ The generated `promotion_gate` requires all of the following:
 
 The gate reports one `recommended` configuration only when every condition passes. Until then, `AgentConfig.enable_dense` remains `False`.
 
-## 4. Freeze and independently verify
+## 4. Fit the residual reranker
+
+Once a semantic finalist passes, train the route-specific residual ranker against exactly that configuration and require its independent out-of-fold gate to pass:
+
+```powershell
+python -m cartographer.train_ranker --with-dense --semantic-config FINALIST --cross-validate --output data/cartographer_index/ranker.json
+```
+
+See [LEARNED_RANKER.md](LEARNED_RANKER.md) for its leakage controls and promotion criteria. If it fails, keep the semantic finalist without learned reranking.
+
+## 5. Freeze and independently verify
 
 Copy the recommended configuration's parameters into `AgentConfig`, enable dense retrieval, and run:
 
@@ -61,7 +71,7 @@ python -m evaluator.local_evaluator --output results.json
 python -m cartographer.benchmark --limit 200 --output semantic_benchmark_200.json
 ```
 
-Repeat the official evaluator once to confirm deterministic product ordering. Record semantic assets as enabled only after the repeated score matches and the benchmark passes.
+Repeat the official evaluator once to confirm deterministic product ordering. Record semantic and learned-ranker assets as enabled only after the repeated score matches and the benchmark passes.
 
 ## Why the search grid is structured this way
 

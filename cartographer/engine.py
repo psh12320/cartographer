@@ -98,6 +98,7 @@ class CartographerEngine:
             cache_hit=retrieval.cache_hit,
             dense_enabled=self.retriever.semantic.enabled,
             cross_encoder_enabled=self.retriever.cross_encoder.enabled,
+            learned_reranker_enabled=self.retriever.learned_reranker.enabled,
         )
         self.traces[session_id].append(trace)
         return {

@@ -37,6 +37,7 @@ flowchart LR
 - Catalog-derived fingerprints for category, material, color, size, style, brand, budget, features, and use case.
 - Persistent SQLite FTS5 index and reciprocal-rank-style lexical features.
 - Optional offline `BAAI/bge-small-en-v1.5` embeddings and MiniLM cross-encoder.
+- Optional route-specific linear reranker promoted only by out-of-fold score gains.
 - Entropy-based next-best-question selection with profile-aware attribute priors.
 - Implicit negative feedback: products returned on an unsuccessful turn are not repeated.
 - Diagnostic traces kept outside the strict official response schema.
@@ -86,6 +87,8 @@ The current measured result keeps both semantic extensions disabled while a port
 
 After importing a GPU-built artifact, follow the score, scenario, determinism, and latency gates in [docs/SEMANTIC_PROMOTION.md](docs/SEMANTIC_PROMOTION.md). Dense inference is deliberately opt-in and cannot silently change the official agent merely because artifacts exist.
 
+After selecting the semantic configuration, [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md) describes the leakage-safe five-fold training and promotion procedure for the dependency-free residual reranker.
+
 ## Run and reproduce
 
 Run every test:
@@ -127,7 +130,7 @@ The response contains only `message`, `ask_attribute`, `recommendations`, and ze
 
 ## Evaluation
 
-The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. On the untouched 200-session official evaluator, the current offline Cartographer configuration achieves Hit Rate@10 `1.000`, MRR `0.690885`, MTTC `2.18`, and TechnicalScore `0.883665`. The protected pre-improvement checkpoint remains available at Git tag `checkpoint-0.865767`. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
+The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. On two byte-identical runs of the untouched 200-session official evaluator, the current offline Cartographer configuration achieves Hit Rate@10 `1.000`, MRR `0.792323`, MTTC `1.89`, and TechnicalScore `0.919897`. The protected checkpoints remain available at Git tags `checkpoint-0.865767` and `working-0.883665`. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
 
 The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge.
 

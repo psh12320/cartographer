@@ -4,6 +4,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
+FROZEN_RANKER_PATH = Path(__file__).with_name("ranker_weights.json")
+
+
 @dataclass(frozen=True)
 class SearchWeights:
     """Feature weights used by the deterministic local reranker."""
@@ -27,6 +30,7 @@ class AgentConfig:
 
     catalog_path: Path = Path("data/catalog.jsonl")
     index_dir: Path = Path("data/cartographer_index")
+    ranker_path: Path | None = FROZEN_RANKER_PATH
     lexical_limit: int = 300
     dense_limit: int = 300
     category_limit: int = 600
@@ -50,12 +54,14 @@ class AgentConfig:
     dense_calibration_ceiling_percentile: float = 99.5
     verify_embedding_checksum_on_load: bool = True
     warm_semantic_encoder: bool = True
+    learned_reranker_scale: float = 1.0
     enable_fts: bool = True
     enable_category: bool = True
     enable_fingerprints: bool = True
     # Semantic artifacts are opt-in until they clear the public score and latency gates.
     enable_dense: bool = False
     enable_cross_encoder: bool = False
+    enable_learned_reranker: bool = True
     enable_state: bool = True
     enable_clarification: bool = True
     diversify_browsing: bool = True

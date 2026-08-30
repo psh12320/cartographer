@@ -50,6 +50,8 @@ def run_once(
         "dense_enabled": agent.engine.retriever.semantic.enabled,
         "dense_failure_reason": agent.engine.retriever.semantic.failure_reason,
         "cross_encoder_enabled": agent.engine.retriever.cross_encoder.enabled,
+        "learned_reranker_enabled": agent.engine.retriever.learned_reranker.enabled,
+        "learned_reranker_failure_reason": agent.engine.retriever.learned_reranker.failure_reason,
         "turn_count": len(latencies),
         "latency_ms": {
             "mean": round(statistics.fmean(latencies), 3) if latencies else 0.0,
@@ -411,7 +413,7 @@ def main() -> None:
                     if float(diagnostics["latency_ms"]["p95"]) > 750.0:
                         blockers.append("p95 latency exceeds 750 ms")
                     stable_folds = sum(
-                        float(candidate) >= float(reference)
+                        float(candidate) + 1e-9 >= float(reference)
                         for candidate, reference in zip(run["fold_scores"], baseline_folds)
                     )
                     if stable_folds < 4:

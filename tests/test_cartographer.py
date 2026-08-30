@@ -12,6 +12,8 @@ from cartographer.config import AgentConfig, SearchWeights
 from cartographer.dialog import DialogManager
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
+from cartographer.ranker import FEATURE_NAMES, LinearReranker
+from cartographer.train_ranker import RankingSnapshot, fit_pairwise
 from cartographer.semantic import (
     SemanticRetriever,
     SemanticSearchResult,
@@ -187,7 +189,7 @@ class CartographerTest(unittest.TestCase):
     def test_runtime_does_not_import_labels_or_evaluator(self) -> None:
         runtime_files = [
             "catalog.py", "clarification.py", "config.py", "dialog.py", "engine.py",
-            "models.py", "retrieval.py", "semantic.py", "text.py",
+            "models.py", "ranker.py", "retrieval.py", "semantic.py", "text.py",
         ]
         package = Path(__file__).resolve().parents[1] / "cartographer"
         source = "\n".join((package / name).read_text(encoding="utf-8") for name in runtime_files)
@@ -295,6 +297,59 @@ class CartographerTest(unittest.TestCase):
         state = SessionState("dense", {}, category="Men Shirts")
         result = engine.retriever.search(state)
         self.assertEqual(result.hits[0].parent_asin, "D")
+
+    def test_linear_reranker_loads_transparent_route_weights(self) -> None:
+        index_dir = self.root / "ranker-index"
+        index_dir.mkdir()
+        weights = {name: 0.0 for name in FEATURE_NAMES}
+        weights["bm25_score"] = 3.0
+        (index_dir / "ranker.json").write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "feature_names": list(FEATURE_NAMES),
+                    "routes": {"buying": weights, "default": weights},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ranker = LinearReranker(index_dir / "ranker.json", enabled=True)
+        self.assertTrue(ranker.enabled)
+        hits = [
+            SearchHit(0, "A", 1.0, bm25_score=0.1),
+            SearchHit(1, "B", 1.0, bm25_score=0.9),
+        ]
+        ranked = ranker.rerank(hits, SessionState("ranker", {}, route="buying"))
+        self.assertEqual(ranked[0].parent_asin, "B")
+
+    def test_ranker_separates_boundary_from_browsing(self) -> None:
+        browsing = SessionState("browsing", {}, route="browsing")
+        boundary = SessionState(
+            "boundary",
+            {},
+            route="browsing",
+            declined_attributes={"color"},
+        )
+        from cartographer.ranker import route_key
+
+        self.assertEqual(route_key(browsing), "browsing")
+        self.assertEqual(route_key(boundary), "boundary")
+
+    def test_pairwise_trainer_learns_positive_feature_direction(self) -> None:
+        zero = {name: 0.0 for name in FEATURE_NAMES}
+        positive = dict(zero)
+        positive["dense_score"] = 1.0
+        snapshots = [
+            RankingSnapshot(
+                sample_id="sample",
+                route="browsing",
+                positive=positive,
+                negatives=[zero],
+            )
+        ]
+        weights, pair_count = fit_pairwise(snapshots, epochs=20)
+        self.assertEqual(pair_count, 1)
+        self.assertGreater(weights["dense_score"], 0.0)
 
 
 if __name__ == "__main__":

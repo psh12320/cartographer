@@ -76,7 +76,9 @@ class SearchHit:
     dense_score: float = 0.0
     dense_rank_score: float = 0.0
     profile_score: float = 0.0
+    popularity_score: float = 0.0
     cross_encoder_score: float = 0.0
+    learned_score: float = 0.0
 
 
 @dataclass
@@ -95,3 +97,4 @@ class TraceEvent:
     cache_hit: bool = False
     dense_enabled: bool = False
     cross_encoder_enabled: bool = False
+    learned_reranker_enabled: bool = False
