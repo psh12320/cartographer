@@ -84,6 +84,8 @@ python -m cartographer.build_index --with-cross-encoder
 
 The current measured result keeps both semantic extensions disabled while a portable GPU-built embedding artifact is prepared. On the test CPU, the verified BGE model's first 128-document batch took 56.62 seconds, projecting about six hours for the full catalog build. The cross-encoder is evaluated only after dense retrieval clears its score and latency gates. Missing optional packages or model assets never prevent the deterministic agent from running.
 
+After importing a GPU-built artifact, follow the score, scenario, determinism, and latency gates in [docs/SEMANTIC_PROMOTION.md](docs/SEMANTIC_PROMOTION.md). Dense inference is deliberately opt-in and cannot silently change the official agent merely because artifacts exist.
+
 ## Run and reproduce
 
 Run every test:

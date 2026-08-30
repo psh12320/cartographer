@@ -74,6 +74,7 @@ class SearchHit:
     constraint_score: float = 0.0
     bm25_score: float = 0.0
     dense_score: float = 0.0
+    dense_rank_score: float = 0.0
     profile_score: float = 0.0
     cross_encoder_score: float = 0.0
 

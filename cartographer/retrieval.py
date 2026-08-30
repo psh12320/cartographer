@@ -53,8 +53,12 @@ class HybridRetriever:
             else []
         )
         lexical_ranks = {product_index: rank for rank, product_index in enumerate(lexical, start=1)}
-        dense = self.semantic.search(semantic_query, self.config.dense_limit)
-        dense_scores = dict(dense)
+        semantic_queries = self._semantic_queries(state, structured_query, semantic_query)
+        dense_result = self.semantic.search(
+            semantic_queries,
+            self.config.dense_limit,
+        )
+        dense = dense_result.hits
         category_all = (
             self.catalog.category_indices(state.category, None)
             if self.config.enable_category and state.category
@@ -149,7 +153,8 @@ class HybridRetriever:
             category_score = self._category_score(state.category, product.category)
             constraint_score = self._constraint_coverage(state, product.search_key, product.price)
             bm25_score = self._rrf_feature(lexical_ranks.get(product_index))
-            dense_score = max(0.0, min(1.0, (dense_scores.get(product_index, -1.0) + 1.0) / 2.0))
+            dense_score = dense_result.score(product_index)
+            dense_rank_score = self._rrf_feature(dense_result.rank(product_index))
             product_attributes = set(product.by_attribute)
             attribute_profile_score = (
                 len(profile_keys & product_attributes) / len(profile_keys) if profile_keys else 0.0
@@ -176,7 +181,8 @@ class HybridRetriever:
                 coverage_weight = weights.constraint_coverage * 1.20
                 category_weight = weights.category
                 bm25_weight = weights.bm25
-                dense_weight = weights.dense * 0.80
+                dense_weight = weights.dense * self.config.dense_buying_multiplier
+                dense_rank_weight = weights.dense_rank * self.config.dense_buying_multiplier
                 profile_weight = weights.profile * 0.80
                 popularity_weight = weights.popularity * self.config.buying_popularity_multiplier
             else:
@@ -184,7 +190,8 @@ class HybridRetriever:
                 coverage_weight = weights.constraint_coverage
                 category_weight = weights.category * 1.15
                 bm25_weight = weights.bm25 * 0.95
-                dense_weight = weights.dense * 1.20
+                dense_weight = weights.dense * self.config.dense_browsing_multiplier
+                dense_rank_weight = weights.dense_rank * self.config.dense_browsing_multiplier
                 profile_weight = weights.profile * 1.20
                 popularity_weight = weights.popularity
             score = (
@@ -193,6 +200,9 @@ class HybridRetriever:
                 + category_weight * category_score
                 + bm25_weight * bm25_score
                 + dense_weight * dense_score
+                + dense_rank_weight * dense_rank_score
+                + weights.dense_constraint_agreement * dense_score * constraint_score
+                + weights.dense_category_agreement * dense_score * category_score
                 + profile_weight * profile_score
                 + popularity_weight * popularity
             )
@@ -209,6 +219,7 @@ class HybridRetriever:
                     constraint_score=constraint_score,
                     bm25_score=bm25_score,
                     dense_score=dense_score,
+                    dense_rank_score=dense_rank_score,
                     profile_score=profile_score,
                 )
             )
@@ -236,6 +247,43 @@ class HybridRetriever:
         state.cached_hits = hits[:cache_limit]
         state.last_query_signature = signature
         return RetrievalResult(state.cached_hits, len(candidate_indices), False)
+
+    def _semantic_queries(
+        self,
+        state: SessionState,
+        structured_query: str,
+        conversational_query: str,
+    ) -> list[tuple[str, float]]:
+        mode = self.config.dense_query_mode
+        if mode == "structured":
+            return [(structured_query, 1.0)]
+        if mode == "conversation":
+            return [(conversational_query, 1.0)]
+        if mode == "compiled":
+            requirements = "; ".join(
+                constraint.value for constraint in state.active_constraints
+            )
+            compiled = " ".join(
+                part
+                for part in (
+                    f"Category: {state.category}." if state.category else "",
+                    f"Requirements: {requirements}." if requirements else "",
+                    f"Request: {conversational_query}." if conversational_query else "",
+                )
+                if part
+            )
+            return [(compiled or structured_query or conversational_query, 1.0)]
+        if mode != "blend":
+            raise ValueError(f"Unsupported dense_query_mode: {mode}")
+        conversation_weight = (
+            self.config.dense_conversation_weight_buying
+            if state.route == "buying"
+            else self.config.dense_conversation_weight_browsing
+        )
+        return [
+            (structured_query, 1.0 - conversation_weight),
+            (conversational_query, conversation_weight),
+        ]
 
     def _rrf_feature(self, rank: int | None) -> float:
         if rank is None:

@@ -3,12 +3,35 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .catalog import CatalogIndex
     from .config import AgentConfig
+
+
+@dataclass
+class SemanticSearchResult:
+    """Dense retrieval output plus calibrated scores for arbitrary catalog rows."""
+
+    hits: list[tuple[int, float]]
+    calibrated_scores: object | None = None
+    ranks: dict[int, int] | None = None
+    floor: float = 0.0
+    ceiling: float = 0.0
+
+    def score(self, product_index: int) -> float:
+        if self.calibrated_scores is None:
+            return 0.0
+        try:
+            return float(self.calibrated_scores[product_index])  # type: ignore[index]
+        except (IndexError, TypeError):
+            return 0.0
+
+    def rank(self, product_index: int) -> int | None:
+        return None if self.ranks is None else self.ranks.get(product_index)
 
 
 class SemanticRetriever:
@@ -52,6 +75,12 @@ class SemanticRetriever:
             if manifest.get("asin_order_sha256") != self.catalog.asin_order_sha256():
                 self.failure_reason = "Embedding rows do not match the current ASIN ordering."
                 return
+            if (
+                self.config.verify_embedding_checksum_on_load
+                and manifest.get("matrix_sha256") != file_sha256(embeddings_path)
+            ):
+                self.failure_reason = "Embedding matrix checksum does not match its manifest."
+                return
             embeddings = np.load(embeddings_path, mmap_mode="r")
             if embeddings.shape[0] != len(self.catalog.products):
                 self.failure_reason = "Embedding matrix row count does not match the catalog."
@@ -62,25 +91,76 @@ class SemanticRetriever:
             self._numpy = np
             self._embeddings = embeddings
             self._model = SentenceTransformer(str(model_path), device="cpu", local_files_only=True)
+            model_dimensions = self._model.get_sentence_embedding_dimension()
+            if model_dimensions != embeddings.shape[1]:
+                self.failure_reason = "Query encoder dimensions do not match the embedding matrix."
+                self._model = None
+                return
+            if self.config.warm_semantic_encoder:
+                self._model.encode(
+                    [self.config.bge_query_instruction + "shopping product"],
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                    convert_to_numpy=True,
+                )
             self.enabled = True
         except Exception as error:  # optional route must never invalidate the agent
             self.failure_reason = f"Dense route unavailable: {error}"
 
-    def search(self, query: str, limit: int) -> list[tuple[int, float]]:
+    def search(
+        self,
+        queries: str | list[tuple[str, float]],
+        limit: int,
+    ) -> SemanticSearchResult:
         if not self.enabled or self._numpy is None or self._model is None or self._embeddings is None:
-            return []
-        vector = self._model.encode(
-            [self.config.bge_query_instruction + query],
+            return SemanticSearchResult([])
+        query_items = self._prepare_queries(queries)
+        if not query_items:
+            return SemanticSearchResult([])
+        vectors = self._model.encode(
+            [self.config.bge_query_instruction + query for query, _ in query_items],
             normalize_embeddings=True,
             show_progress_bar=False,
-        )[0]
-        scores = self._embeddings @ vector
+            convert_to_numpy=True,
+        )
+        weights = self._numpy.asarray([weight for _, weight in query_items], dtype=self._numpy.float32)
+        weights /= max(float(weights.sum()), 1e-12)
+        vector = (vectors * weights[:, None]).sum(axis=0)
+        norm = float(self._numpy.linalg.norm(vector))
+        if norm <= 0.0:
+            return SemanticSearchResult([])
+        vector = self._numpy.asarray(vector / norm, dtype=self._numpy.float32)
+        scores = self._numpy.asarray(self._embeddings @ vector, dtype=self._numpy.float32)
         limit = min(limit, len(scores))
         if limit <= 0:
-            return []
-        candidates = self._numpy.argpartition(scores, -limit)[-limit:]
-        candidates = candidates[self._numpy.argsort(scores[candidates])[::-1]]
-        return [(int(index), float(scores[index])) for index in candidates]
+            return SemanticSearchResult([])
+        # Full lexicographic ordering is still inexpensive at 50k rows and gives
+        # deterministic product-index tie breaking at the top-k boundary.
+        product_indices = self._numpy.arange(len(scores), dtype=self._numpy.int64)
+        candidates = self._numpy.lexsort((product_indices, -scores))[:limit]
+        floor = float(
+            self._numpy.percentile(scores, self.config.dense_calibration_floor_percentile)
+        )
+        ceiling = float(
+            self._numpy.percentile(scores, self.config.dense_calibration_ceiling_percentile)
+        )
+        scale = max(ceiling - floor, 1e-6)
+        calibrated = self._numpy.clip((scores - floor) / scale, 0.0, 1.0)
+        hits = [(int(index), float(scores[index])) for index in candidates]
+        ranks = {int(index): rank for rank, index in enumerate(candidates, start=1)}
+        return SemanticSearchResult(hits, calibrated, ranks, floor, ceiling)
+
+    @staticmethod
+    def _prepare_queries(queries: str | list[tuple[str, float]]) -> list[tuple[str, float]]:
+        raw = [(queries, 1.0)] if isinstance(queries, str) else queries
+        merged: dict[str, float] = {}
+        for query, weight in raw:
+            cleaned = str(query).strip()
+            numeric_weight = max(0.0, float(weight))
+            if not cleaned or numeric_weight <= 0.0:
+                continue
+            merged[cleaned] = merged.get(cleaned, 0.0) + numeric_weight
+        return list(merged.items())
 
 
 class CrossEncoderReranker:

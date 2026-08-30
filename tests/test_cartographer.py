@@ -8,11 +8,16 @@ from pathlib import Path
 
 from cartographer.catalog import CatalogIndex
 from cartographer.clarification import ClarificationPolicy
-from cartographer.config import AgentConfig
+from cartographer.config import AgentConfig, SearchWeights
 from cartographer.dialog import DialogManager
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
-from cartographer.semantic import file_sha256, verify_bge_embeddings
+from cartographer.semantic import (
+    SemanticRetriever,
+    SemanticSearchResult,
+    file_sha256,
+    verify_bge_embeddings,
+)
 from cartographer.text import canonical, classify_constraint, intent_fingerprint
 
 
@@ -219,6 +224,77 @@ class CartographerTest(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "asin_order_sha256"):
             verify_bge_embeddings(catalog, index_dir)
+
+    def test_semantic_result_scores_all_candidates_and_deduplicates_queries(self) -> None:
+        result = SemanticSearchResult(
+            hits=[(1, 0.8)],
+            calibrated_scores=[0.1, 0.9, 0.4],
+            ranks={1: 1},
+            floor=0.2,
+            ceiling=0.8,
+        )
+        self.assertEqual(result.score(1), 0.9)
+        self.assertEqual(result.score(2), 0.4)
+        self.assertEqual(result.rank(1), 1)
+        self.assertIsNone(result.rank(2))
+        self.assertEqual(
+            SemanticRetriever._prepare_queries(
+                [("trail running shoes", 0.25), ("trail running shoes", 0.5), ("", 1.0)]
+            ),
+            [("trail running shoes", 0.75)],
+        )
+
+    def test_semantic_query_modes_preserve_structured_and_active_intent(self) -> None:
+        engine = CartographerEngine(self.catalog_path, self.config)
+        state = SessionState("semantic", {}, category="Men Shirts")
+        manager = DialogManager()
+        manager.update(state, "For this, breathability matters during humid trail runs.", 1)
+        structured = "Men Shirts breathable"
+        active = state.active_query_text
+        blend = engine.retriever._semantic_queries(state, structured, active)
+        self.assertEqual(len(blend), 2)
+        compiled_engine = CartographerEngine(
+            self.catalog_path,
+            self.config.with_overrides(dense_query_mode="compiled"),
+        )
+        compiled = compiled_engine.retriever._semantic_queries(state, structured, active)
+        self.assertEqual(len(compiled), 1)
+        self.assertIn("Category: Men Shirts", compiled[0][0])
+        self.assertIn("humid trail runs", compiled[0][0])
+
+    def test_dense_scores_apply_to_candidates_outside_dense_top_k(self) -> None:
+        config = self.config.with_overrides(
+            weights=SearchWeights(
+                exact_fingerprint=0.0,
+                constraint_coverage=0.0,
+                category=0.0,
+                bm25=0.0,
+                dense=10.0,
+                profile=0.0,
+                popularity=0.0,
+            )
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+
+        class FakeSemantic:
+            enabled = True
+            failure_reason = None
+
+            @staticmethod
+            def search(queries: object, limit: int) -> SemanticSearchResult:
+                del queries, limit
+                # D has the strongest full-matrix score but is deliberately absent
+                # from the dense top-hit list to exercise candidate-wide scoring.
+                return SemanticSearchResult(
+                    hits=[(0, 0.8)],
+                    calibrated_scores=[0.2, 0.3, 0.4, 1.0, 0.5],
+                    ranks={0: 1},
+                )
+
+        engine.retriever.semantic = FakeSemantic()  # type: ignore[assignment]
+        state = SessionState("dense", {}, category="Men Shirts")
+        result = engine.retriever.search(state)
+        self.assertEqual(result.hits[0].parent_asin, "D")
 
 
 if __name__ == "__main__":

@@ -13,6 +13,9 @@ class SearchWeights:
     category: float = 1.8
     bm25: float = 1.4
     dense: float = 1.1
+    dense_rank: float = 0.0
+    dense_constraint_agreement: float = 0.0
+    dense_category_agreement: float = 0.0
     profile: float = 0.15
     popularity: float = 0.05
     cross_encoder: float = 0.5
@@ -38,10 +41,20 @@ class AgentConfig:
     buying_popularity_multiplier: float = 3.0
     popularity_rating_mix: float = 1.0
     suppress_textual_profile_after_override: bool = True
+    dense_conversation_weight_buying: float = 0.35
+    dense_conversation_weight_browsing: float = 0.65
+    dense_query_mode: str = "blend"
+    dense_buying_multiplier: float = 0.80
+    dense_browsing_multiplier: float = 1.20
+    dense_calibration_floor_percentile: float = 75.0
+    dense_calibration_ceiling_percentile: float = 99.5
+    verify_embedding_checksum_on_load: bool = True
+    warm_semantic_encoder: bool = True
     enable_fts: bool = True
     enable_category: bool = True
     enable_fingerprints: bool = True
-    enable_dense: bool = True
+    # Semantic artifacts are opt-in until they clear the public score and latency gates.
+    enable_dense: bool = False
     enable_cross_encoder: bool = False
     enable_state: bool = True
     enable_clarification: bool = True
