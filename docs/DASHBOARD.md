@@ -29,6 +29,8 @@ The replay defaults to the deterministic rule-based ranker. The learned reranker
 
 The target browser maps each public development session to its expected ASIN and visible catalog metadata. It makes target distribution and repeated product/category patterns easy to audit.
 
+The repository now records a locked 100/100 split in `docs/public_split_v1.json`. The dashboard can technically display both partitions because all 200 labels are public, but future model selection must use only the development IDs. The holdout was consumed once for the result in `docs/holdout_v1_results.json`; repeatedly tuning against its target browser or live result would invalidate it as unseen evidence.
+
 ## Reranker A/B
 
 The batch view runs the unchanged evaluator twice on the same selected prefix:
@@ -41,6 +43,8 @@ It reports overall and per-scenario Hit Rate, MRR, MTTC, Efficiency, TechnicalSc
 ## Live latest-code test
 
 Press **Start fresh 200-session test** after saving any agent or Cartographer code changes. The dashboard starts a new Python process, so it imports the current files from disk rather than reusing modules cached by the dashboard server.
+
+After introducing the locked split, this all-200 run is a descriptive regression check, not an independent validation score: half of those sessions trained the current reranker, and the other half has already been used for the recorded one-time audit.
 
 The panel streams one update per completed session and shows:
 

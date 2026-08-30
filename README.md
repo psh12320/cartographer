@@ -87,7 +87,7 @@ The current measured result keeps both semantic extensions disabled while a port
 
 After importing a GPU-built artifact, follow the score, scenario, determinism, and latency gates in [docs/SEMANTIC_PROMOTION.md](docs/SEMANTIC_PROMOTION.md). Dense inference is deliberately opt-in and cannot silently change the official agent merely because artifacts exist.
 
-After selecting the semantic configuration, [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md) describes the leakage-safe five-fold training and promotion procedure for the dependency-free residual reranker.
+After selecting the semantic configuration, [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md) describes the locked 100/100 development and holdout procedure for the dependency-free residual reranker.
 
 ## Run and reproduce
 
@@ -125,6 +125,15 @@ python -m cartographer.experiments --mode ablation --output ablation_results.jso
 python -m cartographer.experiments --mode tune --output tuning_results.json
 ```
 
+Reproduce the locked public split and development-only reranker:
+
+```bash
+python -m cartographer.data_split
+python -m cartographer.train_ranker --split development --routes buying,boundary,override --cross-validate --output cartographer/ranker_weights.json
+```
+
+The holdout comparison command is documented in [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md). It is an audit command, not a tuning loop.
+
 ## Official interface
 
 ```python
@@ -139,9 +148,9 @@ The response contains only `message`, `ask_attribute`, `recommendations`, and ze
 
 ## Evaluation
 
-The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. On two byte-identical runs of the untouched 200-session official evaluator, the current offline Cartographer configuration achieves Hit Rate@10 `1.000`, MRR `0.792323`, MTTC `1.89`, and TechnicalScore `0.919897`. The protected checkpoints remain available at Git tags `checkpoint-0.865767` and `working-0.883665`. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
+The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. The current reranker was trained on a locked 100-session development partition and evaluated once on a disjoint 100-session holdout. It achieved Hit Rate@10 `1.000`, MRR `0.781397`, MTTC `1.91`, and TechnicalScore `0.916219`, versus `0.881763` without the reranker on the same holdout. This is an honest test of unseen fitted weights, but the broader architecture had already been engineered using all 200 public sessions before the split, so it is not a pristine end-to-end test of architecture selection. The earlier all-200 artifact is preserved only in Git history at `working-0.919897`; it is no longer the runtime model. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
 
-The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge.
+The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge. Future score experiments are restricted to the development 100 and prioritized in [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
 
 ## Cost, privacy, and operational profile
 

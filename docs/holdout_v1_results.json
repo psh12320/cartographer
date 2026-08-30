@@ -1,0 +1,94 @@
+{
+  "evaluation_type": "locked public split comparison",
+  "partition": "holdout",
+  "sample_count": 100,
+  "manifest": {
+    "path": "docs/public_split_v1.json",
+    "sha256": "2e92573ca1275da9243135fd1dd0899138f0db971d52c08a3d9810ceb3d0169b",
+    "name": "public-stratified-100-100-v1"
+  },
+  "ranker": {
+    "path": "cartographer/ranker_weights.json",
+    "sha256": "0a464d7c78020cc8a30c94f524043cbe705eab9365030b8fb0f39fda572e7bf2",
+    "trained_partition": "development",
+    "trained_sample_count": 100
+  },
+  "baseline": {
+    "hit_rate_at_10": 1.0,
+    "mrr": 0.68321,
+    "mttc": 2.16,
+    "efficiency": 0.884,
+    "recommended_technical_score": 0.881763
+  },
+  "candidate": {
+    "hit_rate_at_10": 1.0,
+    "mrr": 0.781397,
+    "mttc": 1.91,
+    "efficiency": 0.909,
+    "recommended_technical_score": 0.916219,
+    "latency_ms": {
+      "mean": 125.833,
+      "p95": 241.569,
+      "max": 822.621
+    },
+    "scenario_metrics": {
+      "boundary": {
+        "sample_count": 5,
+        "hit_rate_at_10": 1.0,
+        "mrr": 0.733333,
+        "mttc": 2.8,
+        "technical_score": 0.884
+      },
+      "browsing": {
+        "sample_count": 40,
+        "hit_rate_at_10": 1.0,
+        "mrr": 0.842212,
+        "mttc": 1.95,
+        "technical_score": 0.933664
+      },
+      "buying": {
+        "sample_count": 40,
+        "hit_rate_at_10": 1.0,
+        "mrr": 0.702946,
+        "mttc": 1.075,
+        "technical_score": 0.909384
+      },
+      "intent_override": {
+        "sample_count": 15,
+        "hit_rate_at_10": 1.0,
+        "mrr": 0.844444,
+        "mttc": 3.733333,
+        "technical_score": 0.898667
+      }
+    }
+  },
+  "delta": {
+    "technical_score": 0.034456,
+    "hit_rate_at_10": 0.0,
+    "mrr": 0.098187,
+    "mttc": -0.25,
+    "scenario_technical_scores": {
+      "boundary": 0.149333,
+      "browsing": 0.025342,
+      "buying": 0.014036,
+      "intent_override": 0.074921
+    }
+  },
+  "paired_analysis": {
+    "technical_score_contribution": {
+      "wins": 40,
+      "ties": 47,
+      "losses": 13
+    },
+    "bootstrap": {
+      "method": "paired percentile bootstrap over per-session TechnicalScore contributions",
+      "seed": 2026,
+      "resamples": 100000,
+      "confidence": 0.95,
+      "lower": 0.00967,
+      "upper": 0.059391,
+      "probability_positive": 0.99637
+    },
+    "limitation": "The architecture was developed on all 200 public sessions before this split; the audit isolates weight fitting, not the full architecture-selection process."
+  }
+}

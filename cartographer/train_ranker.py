@@ -24,6 +24,7 @@ from starter.agent import Agent
 
 from .catalog import CatalogIndex
 from .config import AgentConfig
+from .data_split import file_sha256, load_manifest, select_split
 from .experiments import run_once, semantic_configs, stratified_folds, technical_score
 from .ranker import FEATURE_NAMES, feature_rows, route_key
 
@@ -332,6 +333,13 @@ def main() -> None:
     parser.add_argument("--catalog", default="data/catalog.jsonl")
     parser.add_argument("--dataset", default="data/public_set.jsonl")
     parser.add_argument("--output", default="data/cartographer_index/ranker.json")
+    parser.add_argument("--split-manifest", default="docs/public_split_v1.json")
+    parser.add_argument(
+        "--split",
+        choices=("development", "all"),
+        default="development",
+        help="Train on the locked development split by default; use all only for a final explicit refit",
+    )
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--negative-limit", type=int, default=30)
     parser.add_argument("--epochs", type=int, default=60)
@@ -353,7 +361,9 @@ def main() -> None:
     if unknown_routes:
         parser.error(f"unknown route(s): {', '.join(sorted(unknown_routes))}")
 
-    samples = load_jsonl(args.dataset)
+    all_samples = load_jsonl(args.dataset)
+    split_manifest = load_manifest(args.split_manifest, all_samples, args.dataset)
+    samples = select_split(all_samples, split_manifest, args.split)
     if args.limit > 0:
         samples = samples[: args.limit]
     base = AgentConfig(enable_learned_reranker=False)
@@ -389,6 +399,14 @@ def main() -> None:
         "active_routes": sorted(active_routes),
         "uses_public_labels_only_during_training": True,
         "includes_product_identifiers_as_features": False,
+        "data_split": {
+            "manifest": args.split_manifest,
+            "manifest_sha256": file_sha256(args.split_manifest),
+            "name": split_manifest["name"],
+            "partition": args.split,
+            "partition_sample_count": len(samples),
+            "dataset_sha256": split_manifest["source"]["sha256"],
+        },
     }
     if args.cross_validate:
         training["cross_validation"] = cross_validate(

@@ -4,6 +4,7 @@ import json
 import importlib.util
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 from cartographer.catalog import CatalogIndex
@@ -11,6 +12,7 @@ from cartographer.clarification import ClarificationPolicy
 from cartographer.config import AgentConfig, SearchWeights
 from cartographer.dialog import DialogManager
 from cartographer.dashboard import DashboardBackend, decision_signals
+from cartographer.data_split import build_manifest, select_split, validate_manifest
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
 from cartographer.live_evaluator import aggregate_result
@@ -205,6 +207,7 @@ class CartographerTest(unittest.TestCase):
 
         catalog = CatalogIndex(self.catalog_path, self.root / "semantic-index")
         index_dir = self.root / "semantic-index"
+        index_dir.mkdir(parents=True, exist_ok=True)
         matrix_path = index_dir / "embeddings.npy"
         np.save(matrix_path, np.ones((len(catalog.products), 384), dtype=np.float32))
         model_path = index_dir / "bge-small-en-v1.5"
@@ -427,6 +430,50 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual(result["mttc"], 6.0)
         self.assertEqual(result["efficiency"], 0.5)
         self.assertEqual(result["recommended_technical_score"], 0.5)
+
+    def test_public_split_is_deterministic_stratified_disjoint_and_exhaustive(self) -> None:
+        dataset_path = self.root / "split.jsonl"
+        samples = [
+            {
+                "sample_id": f"{scenario}_{index}",
+                "scenario_type": scenario,
+                "ground_truth": {"parent_asin": f"{scenario}_{index}"},
+            }
+            for scenario in ("buying", "browsing", "intent_override", "boundary")
+            for index in range(4)
+        ]
+        dataset_path.write_text(
+            "".join(json.dumps(sample) + "\n" for sample in samples),
+            encoding="utf-8",
+        )
+        first = build_manifest(samples, dataset_path, seed="test-seed")
+        second = build_manifest(samples, dataset_path, seed="test-seed")
+        self.assertEqual(first, second)
+        validate_manifest(samples, first, dataset_path)
+        development = select_split(samples, first, "development")
+        holdout = select_split(samples, first, "holdout")
+        self.assertEqual(len(development), 8)
+        self.assertEqual(len(holdout), 8)
+        self.assertEqual(
+            {sample["sample_id"] for sample in development}
+            & {sample["sample_id"] for sample in holdout},
+            set(),
+        )
+        self.assertEqual(
+            Counter(sample["scenario_type"] for sample in development),
+            Counter({"buying": 2, "browsing": 2, "intent_override": 2, "boundary": 2}),
+        )
+
+    def test_frozen_ranker_uses_only_locked_development_partition(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        payload = json.loads(
+            (repository / "cartographer" / "ranker_weights.json").read_text(encoding="utf-8")
+        )
+        split = payload["training"]["data_split"]
+        self.assertEqual(payload["training"]["sample_count"], 100)
+        self.assertEqual(split["partition"], "development")
+        self.assertEqual(split["partition_sample_count"], 100)
+        self.assertEqual(split["name"], "public-stratified-100-100-v1")
 
 
 if __name__ == "__main__":
