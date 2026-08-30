@@ -1,0 +1,4 @@
+# Core Cartographer is standard-library only. These packages enable the optional BGE routes.
+numpy>=1.26,<3
+sentence-transformers>=3.0,<6
+

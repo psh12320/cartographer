@@ -1,10 +1,17 @@
 __pycache__/
 *.py[cod]
+.venv/
 .DS_Store
 .env
 results.json
 data/catalog.jsonl
+data/catalog.jsonl.gz
+data/SHA256SUMS
+data/cartographer_index/
 data/releases/
+baseline_local.json
+experiment_results.json
+benchmark_results.json
 # Organizer-only code, private evaluation data, manifests, and build reports.
 organizer/
 secure/

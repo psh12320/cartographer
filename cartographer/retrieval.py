@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass
+
+from .catalog import CatalogIndex
+from .config import AgentConfig
+from .dialog import profile_attributes
+from .models import SearchHit, SessionState
+from .semantic import CrossEncoderReranker, SemanticRetriever
+from .text import canonical, token_overlap
+
+
+@dataclass
+class RetrievalResult:
+    hits: list[SearchHit]
+    candidate_count: int
+    cache_hit: bool
+
+
+class HybridRetriever:
+    """Fuse fingerprints, category routing, FTS5, and optional local transformer scores."""
+
+    def __init__(self, catalog: CatalogIndex, config: AgentConfig) -> None:
+        self.catalog = catalog
+        self.config = config
+        self.semantic = SemanticRetriever(catalog, config)
+        self.cross_encoder = CrossEncoderReranker(config.index_dir, config.enable_cross_encoder)
+
+    def search(self, state: SessionState) -> RetrievalResult:
+        signature = (
+            state.route,
+            canonical(state.category),
+            tuple((constraint.attribute, canonical(constraint.value), constraint.strength) for constraint in state.active_constraints),
+        )
+        if signature == state.last_query_signature and state.cached_hits:
+            unseen = [hit for hit in state.cached_hits if hit.parent_asin not in state.seen_products]
+            seen = [hit for hit in state.cached_hits if hit.parent_asin in state.seen_products]
+            state.cached_hits = unseen + seen
+            return RetrievalResult(state.cached_hits, len(state.cached_hits), True)
+
+        query_parts = [state.category, *(constraint.value for constraint in state.active_constraints)]
+        query = " ".join(part for part in query_parts if part).strip()
+        lexical = self.catalog.lexical_search(query, self.config.lexical_limit) if self.config.enable_fts else []
+        lexical_ranks = {product_index: rank for rank, product_index in enumerate(lexical, start=1)}
+        dense = self.semantic.search(query, self.config.dense_limit)
+        dense_scores = dict(dense)
+        category = (
+            self.catalog.category_indices(state.category, self.config.category_limit)
+            if self.config.enable_category and state.category
+            else []
+        )
+
+        exact_sets: list[set[int]] = []
+        exact_counts: dict[int, int] = {}
+        if self.config.enable_fingerprints:
+            for constraint in state.active_constraints:
+                matches = set(self.catalog.exact_constraint_indices(constraint.value))
+                if matches:
+                    exact_sets.append(matches)
+                    for product_index in matches:
+                        exact_counts[product_index] = exact_counts.get(product_index, 0) + 1
+
+        candidate_indices = set(lexical)
+        candidate_indices.update(product_index for product_index, _ in dense)
+        candidate_indices.update(category)
+        candidate_indices.update(exact_counts)
+        if not candidate_indices:
+            candidate_indices.update(range(min(self.config.category_limit, len(self.catalog.products))))
+
+        # A constraint becomes a destructive filter only when metadata coverage is safe.
+        hard_sets = [
+            set(self.catalog.exact_constraint_indices(constraint.value))
+            for constraint in state.active_constraints
+            if constraint.strength == "hard" and self.catalog.exact_constraint_indices(constraint.value)
+        ]
+        if hard_sets:
+            eligible = set(category) if category else set(candidate_indices)
+            for matches in hard_sets:
+                narrowed = eligible & matches
+                if len(narrowed) >= self.config.hard_filter_minimum:
+                    eligible = narrowed
+            if len(eligible) >= self.config.hard_filter_minimum:
+                # Preserve direct exact matches even if the category parser was imperfect.
+                candidate_indices = (candidate_indices & eligible) | set(exact_counts)
+
+        profile_keys = profile_attributes(state.user_profile)
+        hits: list[SearchHit] = []
+        for product_index in candidate_indices:
+            product = self.catalog.products[product_index]
+            exact_count = exact_counts.get(product_index, 0)
+            category_score = self._category_score(state.category, product.category)
+            constraint_score = self._constraint_coverage(state, product.search_key, product.price)
+            bm25_score = self._rrf_feature(lexical_ranks.get(product_index))
+            dense_score = max(0.0, min(1.0, (dense_scores.get(product_index, -1.0) + 1.0) / 2.0))
+            product_attributes = set(product.by_attribute)
+            profile_score = (
+                len(profile_keys & product_attributes) / len(profile_keys) if profile_keys else 0.0
+            )
+            popularity = (
+                (product.average_rating / 5.0) * min(1.0, math.log1p(product.rating_number) / 10.0)
+            )
+            weights = self.config.weights
+            if state.route == "buying":
+                exact_weight = weights.exact_fingerprint * 1.15
+                coverage_weight = weights.constraint_coverage * 1.20
+                category_weight = weights.category
+                bm25_weight = weights.bm25
+                dense_weight = weights.dense * 0.80
+                profile_weight = weights.profile * 0.80
+            else:
+                exact_weight = weights.exact_fingerprint
+                coverage_weight = weights.constraint_coverage
+                category_weight = weights.category * 1.15
+                bm25_weight = weights.bm25 * 0.95
+                dense_weight = weights.dense * 1.20
+                profile_weight = weights.profile * 1.20
+            score = (
+                exact_weight * exact_count
+                + coverage_weight * constraint_score
+                + category_weight * category_score
+                + bm25_weight * bm25_score
+                + dense_weight * dense_score
+                + profile_weight * profile_score
+                + weights.popularity * popularity
+            )
+            hits.append(
+                SearchHit(
+                    product_index=product_index,
+                    parent_asin=product.parent_asin,
+                    score=score,
+                    exact_matches=exact_count,
+                    category_score=category_score,
+                    constraint_score=constraint_score,
+                    bm25_score=bm25_score,
+                    dense_score=dense_score,
+                    profile_score=profile_score,
+                )
+            )
+
+        hits.sort(key=lambda hit: (-hit.score, hit.parent_asin))
+        if self.cross_encoder.enabled and query:
+            rerank_count = min(40, len(hits))
+            documents = [self.catalog.products[hit.product_index].search_text for hit in hits[:rerank_count]]
+            scores = self.cross_encoder.score(query, documents)
+            for hit, cross_score in zip(hits[:rerank_count], scores):
+                hit.cross_encoder_score = cross_score
+                hit.score += self.config.weights.cross_encoder * cross_score
+            hits[:rerank_count] = sorted(hits[:rerank_count], key=lambda hit: (-hit.score, hit.parent_asin))
+
+        # A continuing session is implicit negative feedback: previously returned products were misses.
+        unseen = [hit for hit in hits if hit.parent_asin not in state.seen_products]
+        seen = [hit for hit in hits if hit.parent_asin in state.seen_products]
+        hits = unseen + seen
+        cache_limit = max(
+            self.config.category_limit,
+            self.config.clarification_pool,
+            self.config.lexical_limit,
+            self.config.dense_limit,
+        )
+        state.cached_hits = hits[:cache_limit]
+        state.last_query_signature = signature
+        return RetrievalResult(state.cached_hits, len(candidate_indices), False)
+
+    def _rrf_feature(self, rank: int | None) -> float:
+        if rank is None:
+            return 0.0
+        return (self.config.rrf_k + 1.0) / (self.config.rrf_k + float(rank))
+
+    @staticmethod
+    def _category_score(query_category: str, product_category: str) -> float:
+        if not query_category:
+            return 0.0
+        if canonical(query_category) == canonical(product_category):
+            return 1.0
+        return token_overlap(query_category, product_category)
+
+    @staticmethod
+    def _constraint_coverage(state: SessionState, search_key: str, price: float | None) -> float:
+        constraints = state.active_constraints
+        if not constraints:
+            return 0.0
+        total = 0.0
+        padded_search = f" {search_key} "
+        for constraint in constraints:
+            key = canonical(constraint.value)
+            if key and key in search_key:
+                match = 1.0
+            else:
+                query_terms = [value for value in key.split() if len(value) > 1]
+                match = (
+                    sum(f" {value} " in padded_search for value in query_terms) / len(query_terms)
+                    if query_terms
+                    else 0.0
+                )
+            if constraint.attribute == "budget" and price is not None:
+                numeric = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", constraint.value)]
+                if numeric:
+                    target = numeric[-1]
+                    match = max(match, max(0.0, 1.0 - abs(price - target) / max(target, 1.0)))
+            total += match * (1.25 if constraint.strength == "hard" else 1.0)
+        denominator = sum(1.25 if item.strength == "hard" else 1.0 for item in constraints)
+        return total / denominator if denominator else 0.0
+
+
+def diversify_browsing(hits: list[SearchHit], catalog: CatalogIndex, limit: int) -> list[SearchHit]:
+    """Keep the top three precise, then add mild intent-fingerprint diversity."""
+
+    if len(hits) <= 3 or limit <= 3:
+        return hits[:limit]
+    selected = hits[:3]
+    remaining = hits[3: min(len(hits), 80)]
+    selected_keys = {
+        canonical(value)
+        for hit in selected
+        for value in catalog.products[hit.product_index].constraints
+    }
+    while remaining and len(selected) < limit:
+        best_position = 0
+        best_value = float("-inf")
+        for position, hit in enumerate(remaining):
+            product_keys = {canonical(value) for value in catalog.products[hit.product_index].constraints}
+            overlap = len(product_keys & selected_keys) / max(1, len(product_keys))
+            value = hit.score - 0.08 * overlap
+            if value > best_value:
+                best_value = value
+                best_position = position
+        chosen = remaining.pop(best_position)
+        selected.append(chosen)
+        selected_keys.update(canonical(value) for value in catalog.products[chosen.product_index].constraints)
+    if len(selected) < limit:
+        selected.extend(hit for hit in hits if hit not in selected and len(selected) < limit)
+    return selected[:limit]
