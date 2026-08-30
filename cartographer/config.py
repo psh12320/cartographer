@@ -27,6 +27,7 @@ class AgentConfig:
     lexical_limit: int = 300
     dense_limit: int = 300
     category_limit: int = 600
+    max_scored_candidates: int = 5000
     clarification_pool: int = 500
     max_retained_sessions: int = 64
     hard_filter_minimum: int = 10

@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-win/
 .DS_Store
 .env
 results.json
@@ -11,7 +12,9 @@ data/cartographer_index/
 data/releases/
 baseline_local.json
 experiment_results.json
+ablation_results.json
 benchmark_results.json
+evaluation_shards/
 # Organizer-only code, private evaluation data, manifests, and build reports.
 organizer/
 secure/

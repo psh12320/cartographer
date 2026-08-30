@@ -83,9 +83,12 @@ class CartographerTest(unittest.TestCase):
         state.last_asked = "color"
         manager.update(state, "I don't have a preference for color; please use your judgment.", 2)
         self.assertIn("color", state.declined_attributes)
+        state.seen_products.add("A")
         manager.update(state, "Actually, ignore my earlier preference. What I need is: wool.", 3)
         self.assertEqual(state.intent_epoch, 1)
         self.assertEqual([canonical(item.value) for item in state.active_constraints], ["wool"])
+        self.assertEqual(state.override_shortlist, {"A"})
+        self.assertEqual(state.seen_products, set())
 
     def test_entropy_policy_prefers_discriminating_feature(self) -> None:
         catalog = CatalogIndex(self.catalog_path, self.root / "index")

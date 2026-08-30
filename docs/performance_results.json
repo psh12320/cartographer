@@ -1,0 +1,23 @@
+{
+  "diagnostic_sample_count": 20,
+  "agent_turn_count": 48,
+  "initialization_plus_evaluation_seconds": 47.889,
+  "latency_ms": {
+    "mean": 256.262,
+    "p50": 254.715,
+    "p95": 562.459,
+    "max": 754.542
+  },
+  "observed_full_process_working_set_mib_upper_bound": 461,
+  "reported_tokens": 0,
+  "bge_gate": {
+    "model_assets_verified": true,
+    "first_batch_documents": 128,
+    "first_batch_seconds": 56.62,
+    "total_batches": 391,
+    "projected_full_build_hours": 6.15,
+    "enabled_in_frozen_config": false,
+    "decision": "failed practicality gate"
+  },
+  "cross_encoder_enabled": false
+}

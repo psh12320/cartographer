@@ -25,6 +25,7 @@ class SessionState:
     declined_attributes: set[str] = field(default_factory=set)
     last_asked: str | None = None
     seen_products: set[str] = field(default_factory=set)
+    override_shortlist: set[str] = field(default_factory=set)
     last_query_signature: tuple = field(default_factory=tuple)
     cached_hits: list["SearchHit"] = field(default_factory=list)
 
@@ -79,4 +80,3 @@ class TraceEvent:
     cache_hit: bool = False
     dense_enabled: bool = False
     cross_encoder_enabled: bool = False
-

@@ -46,19 +46,18 @@ class HybridRetriever:
         lexical_ranks = {product_index: rank for rank, product_index in enumerate(lexical, start=1)}
         dense = self.semantic.search(query, self.config.dense_limit)
         dense_scores = dict(dense)
-        category = (
-            self.catalog.category_indices(state.category, self.config.category_limit)
+        category_all = (
+            self.catalog.category_indices(state.category, None)
             if self.config.enable_category and state.category
             else []
         )
+        category = category_all[: self.config.category_limit]
 
-        exact_sets: list[set[int]] = []
         exact_counts: dict[int, int] = {}
         if self.config.enable_fingerprints:
             for constraint in state.active_constraints:
                 matches = set(self.catalog.exact_constraint_indices(constraint.value))
                 if matches:
-                    exact_sets.append(matches)
                     for product_index in matches:
                         exact_counts[product_index] = exact_counts.get(product_index, 0) + 1
 
@@ -66,6 +65,11 @@ class HybridRetriever:
         candidate_indices.update(product_index for product_index, _ in dense)
         candidate_indices.update(category)
         candidate_indices.update(exact_counts)
+        candidate_indices.update(
+            self.catalog.asin_to_index[asin]
+            for asin in state.override_shortlist
+            if asin in self.catalog.asin_to_index
+        )
         if not candidate_indices:
             candidate_indices.update(range(min(self.config.category_limit, len(self.catalog.products))))
 
@@ -76,14 +80,50 @@ class HybridRetriever:
             if constraint.strength == "hard" and self.catalog.exact_constraint_indices(constraint.value)
         ]
         if hard_sets:
-            eligible = set(category) if category else set(candidate_indices)
+            eligible = set(category_all) if category_all else set(candidate_indices)
             for matches in hard_sets:
                 narrowed = eligible & matches
                 if len(narrowed) >= self.config.hard_filter_minimum:
                     eligible = narrowed
             if len(eligible) >= self.config.hard_filter_minimum:
-                # Preserve direct exact matches even if the category parser was imperfect.
-                candidate_indices = (candidate_indices & eligible) | set(exact_counts)
+                # Keep the safe intersection and a small escape hatch for imperfect category parsing.
+                direct_escape = {
+                    index
+                    for index, _ in sorted(
+                        exact_counts.items(),
+                        key=lambda item: (-item[1], self.catalog.products[item[0]].parent_asin),
+                    )[:50]
+                }
+                candidate_indices = (candidate_indices & eligible) | direct_escape
+
+        if len(candidate_indices) > self.config.max_scored_candidates:
+            category_members = set(category_all)
+            priority = [
+                self.catalog.asin_to_index[asin]
+                for asin in sorted(state.override_shortlist)
+                if asin in self.catalog.asin_to_index
+            ]
+            priority.extend(
+                index
+                for index, _ in sorted(
+                    exact_counts.items(),
+                    key=lambda item: (
+                        item[0] not in category_members,
+                        -item[1],
+                        self.catalog.products[item[0]].parent_asin,
+                    ),
+                )
+            )
+            priority.extend(lexical)
+            priority.extend(index for index, _ in dense)
+            priority.extend(category)
+            limited: set[int] = set()
+            for index in priority:
+                if index in candidate_indices:
+                    limited.add(index)
+                if len(limited) >= self.config.max_scored_candidates:
+                    break
+            candidate_indices = limited
 
         profile_keys = profile_attributes(state.user_profile)
         hits: list[SearchHit] = []
@@ -125,6 +165,9 @@ class HybridRetriever:
                 + profile_weight * profile_score
                 + weights.popularity * popularity
             )
+            if product.parent_asin in state.override_shortlist:
+                # Reconsider earlier options under the corrected constraint instead of losing them.
+                score += 3.5 * constraint_score
             hits.append(
                 SearchHit(
                     product_index=product_index,

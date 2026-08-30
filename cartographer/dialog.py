@@ -51,6 +51,7 @@ class DialogManager:
             for constraint in state.constraints:
                 constraint.active = False
             state.route = "buying"
+            state.override_shortlist = set(state.seen_products)
             state.seen_products.clear()
             state.asked_attributes.clear()
             state.declined_attributes.clear()

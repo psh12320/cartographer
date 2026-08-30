@@ -195,7 +195,8 @@ class CatalogIndex:
         return manifest_path
 
     def lexical_search(self, query: str, limit: int) -> list[int]:
-        query_terms = terms(query, 24)
+        # Long OR expressions dominate tail latency and add little once a full fingerprint matches.
+        query_terms = terms(query, 8)
         if not query_terms:
             return []
         expression = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in query_terms)

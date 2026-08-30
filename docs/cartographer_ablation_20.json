@@ -1,0 +1,13 @@
+{
+  "sample_count": 20,
+  "reportable": false,
+  "purpose": "component directionality",
+  "runs": {
+    "full": {"hit_rate_at_10": 1.0, "mrr": 0.683929, "mttc": 2.4, "technical_score": 0.877179},
+    "no_dense": {"hit_rate_at_10": 1.0, "mrr": 0.683929, "mttc": 2.4, "technical_score": 0.877179},
+    "no_fingerprints": {"hit_rate_at_10": 1.0, "mrr": 0.56756, "mttc": 2.65, "technical_score": 0.837268},
+    "no_state": {"hit_rate_at_10": 0.8, "mrr": 0.455119, "mttc": 4.05, "technical_score": 0.675536},
+    "no_clarification": {"hit_rate_at_10": 0.75, "mrr": 0.282202, "mttc": 5.6, "technical_score": 0.567661},
+    "bm25_only": {"hit_rate_at_10": 0.5, "mrr": 0.154365, "mttc": 7.0, "technical_score": 0.37631}
+  }
+}

@@ -82,7 +82,7 @@ The setup command saves both document embeddings and a local copy of the query e
 python -m cartographer.build_index --with-embeddings --with-cross-encoder
 ```
 
-The cross-encoder remains disabled by default until the ablation gate shows at least `+0.01` TechnicalScore improvement with warm p95 latency below 750 ms. Missing optional packages or model assets never prevent the deterministic agent from running.
+The frozen submission keeps both semantic extensions disabled. On the test CPU, the verified BGE model's first 128-document batch took 56.62 seconds, projecting about six hours for the full catalog build and failing the practicality gate. The cross-encoder is evaluated only after dense retrieval clears that gate. Missing optional packages or model assets never prevent the deterministic agent from running.
 
 ## Run and reproduce
 
@@ -125,7 +125,7 @@ The response contains only `message`, `ask_attribute`, `recommendations`, and ze
 
 ## Evaluation
 
-The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. Cartographer's frozen full-set result is recorded in [docs/RESULTS.md](docs/RESULTS.md) and `results.json` after evaluation. Results are also reported per Buying, Browsing, Intent Override, and Boundary scenario.
+The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. On the untouched 200-session official evaluator, Cartographer achieves Hit Rate@10 `1.000`, MRR `0.636558`, MTTC `2.26`, and TechnicalScore `0.865767`. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
 
 The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge.
 
