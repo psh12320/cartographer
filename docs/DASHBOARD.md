@@ -38,6 +38,21 @@ The batch view runs the unchanged evaluator twice on the same selected prefix:
 
 It reports overall and per-scenario Hit Rate, MRR, MTTC, Efficiency, TechnicalScore, latency, and per-session changes in turn and reciprocal rank. These are public-development diagnostics, not private-test estimates.
 
+## Live latest-code test
+
+Press **Start fresh 200-session test** after saving any agent or Cartographer code changes. The dashboard starts a new Python process, so it imports the current files from disk rather than reusing modules cached by the dashboard server.
+
+The panel streams one update per completed session and shows:
+
+- Completed count, percentage, elapsed time, and ETA.
+- Rolling Hit Rate, MRR, MTTC, Efficiency, and TechnicalScore.
+- Rolling per-scenario metrics.
+- Hit turn and rank for every completed session.
+- Git commit, dirty working-tree paths, and a SHA-256 manifest for every agent/Cartographer Python source file.
+- A downloadable final JSON artifact containing all 200 per-session results.
+
+Use **Cancel running test** to terminate the fresh evaluator without stopping the dashboard. Run artifacts are saved under `data/cartographer_index/live_runs/`, which is already excluded from Git.
+
 ## Interpreting the result
 
 - Target absent from the candidate pool: prioritize retrieval, embeddings, synonyms, or query parsing.

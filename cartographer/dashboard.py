@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import os
 import statistics
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -104,6 +108,30 @@ SESSION_COMPARISON_HEADERS = [
     "Reranker rank",
     "Turn improvement",
     "Reciprocal-rank improvement",
+]
+
+LIVE_SCENARIO_HEADERS = [
+    "Scenario",
+    "Sessions",
+    "Hit Rate@10",
+    "MRR",
+    "MTTC",
+    "Efficiency",
+    "TechnicalScore",
+]
+
+LIVE_SESSION_HEADERS = [
+    "Completed",
+    "Session",
+    "Scenario",
+    "Hit",
+    "First hit turn",
+    "Best rank",
+    "Reciprocal rank",
+    "Running Hit Rate",
+    "Running MRR",
+    "Running MTTC",
+    "Running TechnicalScore",
 ]
 
 DASHBOARD_CSS = """
@@ -596,6 +624,165 @@ class DashboardBackend:
         )
         return summary, comparison_rows, session_rows
 
+    @staticmethod
+    def _live_scenario_rows(overall: dict[str, Any]) -> list[list[Any]]:
+        rows: list[list[Any]] = []
+        for scenario, summary in dict(overall.get("scenario_metrics") or {}).items():
+            efficiency, score = _technical_score(summary)
+            rows.append(
+                [
+                    scenario,
+                    summary["sample_count"],
+                    summary["hit_rate_at_10"],
+                    summary["mrr"],
+                    summary["mttc"],
+                    _round(efficiency),
+                    _round(score),
+                ]
+            )
+        return rows
+
+    def stream_live_evaluation(self):
+        """Run all 200 sessions in a new interpreter so disk edits are imported."""
+
+        timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        output_path = self.catalog.index_dir / "live_runs" / f"evaluation-{timestamp}.json"
+        command = [
+            sys.executable,
+            "-u",
+            "-m",
+            "cartographer.live_evaluator",
+            "--catalog",
+            self.catalog_path,
+            "--dataset",
+            self.dataset_path,
+            "--output",
+            str(output_path),
+        ]
+        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        process = subprocess.Popen(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=creation_flags,
+        )
+        session_rows: list[list[Any]] = []
+        metadata: dict[str, Any] = {}
+        recent_log: list[str] = []
+        completed_normally = False
+        try:
+            if process.stdout is None:
+                raise RuntimeError("Fresh evaluator did not expose a progress stream")
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    recent_log.append(line)
+                    recent_log = recent_log[-8:]
+                    yield (
+                        "## Fresh evaluation is starting\n\n`" + "\n".join(recent_log) + "`",
+                        {},
+                        [],
+                        session_rows,
+                        metadata,
+                        None,
+                    )
+                    continue
+                kind = event.get("event")
+                if kind == "start":
+                    metadata = dict(event["metadata"])
+                    dirty = metadata.get("git", {}).get("working_tree_changes") or []
+                    yield (
+                        "## Fresh 200-session evaluation initialized\n\n"
+                        f"Source digest: `{metadata['source']['combined_sha256'][:16]}…`  \n"
+                        f"Git commit: `{metadata.get('git', {}).get('commit') or 'unavailable'}`  \n"
+                        f"Working-tree changes: `{len(dirty)}`  \n\n"
+                        "The child process imported the current files from disk after you pressed Start.",
+                        {},
+                        [],
+                        session_rows,
+                        metadata,
+                        None,
+                    )
+                elif kind == "progress":
+                    completed = int(event["completed"])
+                    total = int(event["total"])
+                    overall = dict(event["overall"])
+                    session = dict(event["session"])
+                    score = float(overall["recommended_technical_score"])
+                    session_rows.append(
+                        [
+                            completed,
+                            session["sample_id"],
+                            session["scenario_type"],
+                            session["hit"],
+                            session["first_hit_turn"],
+                            session["best_rank"],
+                            _round(session["reciprocal_rank"]),
+                            overall["hit_rate_at_10"],
+                            overall["mrr"],
+                            overall["mttc"],
+                            score,
+                        ]
+                    )
+                    filled = round(30 * completed / total)
+                    bar = "█" * filled + "░" * (30 - filled)
+                    status = (
+                        f"## Running latest code: {completed}/{total} ({100 * completed / total:.1f}%)\n\n"
+                        f"`{bar}`\n\n"
+                        f"Current session: `{session['sample_id']}` · {session['scenario_type']} · "
+                        f"{'hit' if session['hit'] else 'miss'}  \n"
+                        f"Running TechnicalScore: **{score:.6f}**  \n"
+                        f"Elapsed: `{float(event['elapsed_seconds']):.1f}s` · "
+                        f"ETA: `{float(event['eta_seconds']):.1f}s`"
+                    )
+                    yield (
+                        status,
+                        {key: value for key, value in overall.items() if key != "scenario_metrics"},
+                        self._live_scenario_rows(overall),
+                        session_rows,
+                        metadata,
+                        None,
+                    )
+                elif kind == "complete":
+                    result = dict(event["result"])
+                    completed_normally = True
+                    status = (
+                        "## ✅ Fresh 200-session evaluation complete\n\n"
+                        f"TechnicalScore: **{float(result['recommended_technical_score']):.6f}** · "
+                        f"Hit Rate: **{float(result['hit_rate_at_10']):.6f}** · "
+                        f"MRR: **{float(result['mrr']):.6f}** · MTTC: **{float(result['mttc']):.6f}**\n\n"
+                        f"Artifact: `{event['output']}`"
+                    )
+                    yield (
+                        status,
+                        {key: value for key, value in result.items() if key not in {"scenario_metrics", "live_evaluation"}},
+                        self._live_scenario_rows(result),
+                        session_rows,
+                        {**metadata, "completed": result.get("live_evaluation")},
+                        event["output"],
+                    )
+            return_code = process.wait()
+            if return_code != 0 and not completed_normally:
+                raise RuntimeError(
+                    f"Fresh evaluator exited with code {return_code}: " + " | ".join(recent_log[-4:])
+                )
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
 
 def build_dashboard(backend: DashboardBackend):
     try:
@@ -710,6 +897,46 @@ def build_dashboard(backend: DashboardBackend):
                 outputs=[comparison_summary, comparison, session_comparison],
                 concurrency_limit=1,
             )
+        with gr.Tab("Live latest-code test"):
+            gr.Markdown(
+                "Run the unchanged evaluator across all 200 public development sessions in a **new Python "
+                "process**. This imports whatever code is currently saved on disk, even if the dashboard was "
+                "started before your edits. Complete artifacts are stored under the ignored "
+                "`data/cartographer_index/live_runs/` directory."
+            )
+            with gr.Row():
+                start_live = gr.Button("Start fresh 200-session test", variant="primary")
+                stop_live = gr.Button("Cancel running test", variant="stop")
+            live_status = gr.Markdown("No live evaluation is running.")
+            with gr.Row():
+                live_overall = gr.JSON(label="Rolling overall metrics")
+                live_metadata = gr.JSON(label="Exact source and Git metadata")
+            live_scenarios = gr.Dataframe(
+                headers=LIVE_SCENARIO_HEADERS,
+                interactive=False,
+                label="Rolling per-scenario metrics",
+            )
+            live_sessions = gr.Dataframe(
+                headers=LIVE_SESSION_HEADERS,
+                interactive=False,
+                label="One row appears after every completed session",
+            )
+            live_artifact = gr.File(label="Download complete evaluation JSON", interactive=False)
+            live_event = start_live.click(
+                fn=backend.stream_live_evaluation,
+                inputs=[],
+                outputs=[
+                    live_status,
+                    live_overall,
+                    live_scenarios,
+                    live_sessions,
+                    live_metadata,
+                    live_artifact,
+                ],
+                concurrency_limit=1,
+                api_name="run_live_200",
+            )
+            stop_live.click(fn=None, cancels=[live_event])
         with gr.Tab("How to decide"):
             gr.Markdown(
                 """

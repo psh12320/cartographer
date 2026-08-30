@@ -109,7 +109,7 @@ Inspect a complete conversational trace:
 python -m cartographer.demo --sample-id public_0002
 ```
 
-Launch the local evaluator observatory to inspect all 200 targets, replay complete conversations, view every recommended product and inference feature, and compare the deterministic and learned rerankers:
+Launch the local evaluator observatory to inspect all 200 targets, replay complete conversations, view every recommended product and inference feature, compare the deterministic and learned rerankers, and start a fresh-process 200-session test after any saved code update:
 
 ```bash
 python -m pip install -r requirements-dashboard.txt

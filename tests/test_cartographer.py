@@ -13,6 +13,7 @@ from cartographer.dialog import DialogManager
 from cartographer.dashboard import DashboardBackend, decision_signals
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
+from cartographer.live_evaluator import aggregate_result
 from cartographer.ranker import FEATURE_NAMES, LinearReranker
 from cartographer.train_ranker import RankingSnapshot, fit_pairwise
 from cartographer.semantic import (
@@ -400,6 +401,32 @@ class CartographerTest(unittest.TestCase):
         )
         self.assertIn("Retrieval gap", retrieval[0])
         self.assertIn("Ranking gap", ranking[0])
+
+    def test_live_evaluator_aggregation_matches_official_formula(self) -> None:
+        sessions = [
+            {
+                "sample_id": "hit",
+                "scenario_type": "buying",
+                "hit": True,
+                "first_hit_turn": 1,
+                "best_rank": 1,
+                "reciprocal_rank": 1.0,
+            },
+            {
+                "sample_id": "miss",
+                "scenario_type": "browsing",
+                "hit": False,
+                "first_hit_turn": None,
+                "best_rank": None,
+                "reciprocal_rank": 0.0,
+            },
+        ]
+        result = aggregate_result(sessions)
+        self.assertEqual(result["hit_rate_at_10"], 0.5)
+        self.assertEqual(result["mrr"], 0.5)
+        self.assertEqual(result["mttc"], 6.0)
+        self.assertEqual(result["efficiency"], 0.5)
+        self.assertEqual(result["recommended_technical_score"], 0.5)
 
 
 if __name__ == "__main__":
