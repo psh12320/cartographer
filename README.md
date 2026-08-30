@@ -109,6 +109,15 @@ Inspect a complete conversational trace:
 python -m cartographer.demo --sample-id public_0002
 ```
 
+Launch the local evaluator observatory to inspect all 200 targets, replay complete conversations, view every recommended product and inference feature, and compare the deterministic and learned rerankers:
+
+```bash
+python -m pip install -r requirements-dashboard.txt
+python -m cartographer.dashboard --inbrowser
+```
+
+See [docs/DASHBOARD.md](docs/DASHBOARD.md) for the panel guide and methodology warnings.
+
 Run component ablations or five-fold weight tuning:
 
 ```bash

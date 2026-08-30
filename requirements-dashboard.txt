@@ -1,0 +1,4 @@
+# Optional local diagnostic dashboard. Core agent inference remains standard-library only.
+# Gradio 6 requires huggingface-hub 1.x, which conflicts with the frozen
+# Transformers stack used by optional BGE inference.
+gradio>=5.0,<6

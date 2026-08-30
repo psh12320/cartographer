@@ -10,6 +10,7 @@ from cartographer.catalog import CatalogIndex
 from cartographer.clarification import ClarificationPolicy
 from cartographer.config import AgentConfig, SearchWeights
 from cartographer.dialog import DialogManager
+from cartographer.dashboard import DashboardBackend, decision_signals
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
 from cartographer.ranker import FEATURE_NAMES, LinearReranker
@@ -350,6 +351,55 @@ class CartographerTest(unittest.TestCase):
         weights, pair_count = fit_pairwise(snapshots, epochs=20)
         self.assertEqual(pair_count, 1)
         self.assertGreater(weights["dense_score"], 0.0)
+
+    def test_dashboard_replays_evaluator_and_exposes_target_diagnostics(self) -> None:
+        dataset_path = self.root / "public_set.jsonl"
+        dataset_path.write_text(
+            json.dumps(
+                {
+                    "sample_id": "public_test",
+                    "scenario_type": "buying",
+                    "difficulty_bucket": "easy",
+                    "user_profile": {"preference_tags": ["material"]},
+                    "ground_truth": {"parent_asin": "A"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        backend = DashboardBackend(
+            self.catalog_path,
+            dataset_path,
+            self.root / "dashboard-index",
+        )
+        summary, chat, turns, products, target, profile, inference, decisions = backend.replay(
+            "public_test",
+            enable_learned_reranker=False,
+            enable_dense=False,
+            enable_clarification=True,
+            diversify_browsing=False,
+        )
+        self.assertIn("HIT", summary)
+        self.assertEqual(target["parent_asin"], "A")
+        self.assertEqual(profile["preference_tags"], ["material"])
+        self.assertTrue(chat)
+        self.assertTrue(turns)
+        self.assertTrue(products)
+        self.assertEqual(inference["target"], "A")
+        self.assertIn("turns", inference)
+        self.assertIn("What this replay suggests", decisions)
+
+    def test_dashboard_decision_signals_distinguish_retrieval_and_ranking(self) -> None:
+        retrieval = decision_signals(
+            [{"target_candidate_position": None, "ask_attribute": "material", "category": "Shirts"}],
+            None,
+        )
+        ranking = decision_signals(
+            [{"target_candidate_position": 24, "ask_attribute": "material", "category": "Shirts"}],
+            None,
+        )
+        self.assertIn("Retrieval gap", retrieval[0])
+        self.assertIn("Ranking gap", ranking[0])
 
 
 if __name__ == "__main__":
