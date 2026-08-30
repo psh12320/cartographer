@@ -19,12 +19,19 @@ class CartographerEngine:
         self,
         catalog_path: str | Path = "data/catalog.jsonl",
         config: AgentConfig | None = None,
+        catalog_index: CatalogIndex | None = None,
     ) -> None:
         self.config = (config or AgentConfig()).with_catalog(catalog_path)
-        self.catalog = CatalogIndex(self.config.catalog_path, self.config.index_dir)
+        self.catalog = catalog_index or CatalogIndex(self.config.catalog_path, self.config.index_dir)
         self.dialog = DialogManager()
         self.retriever = HybridRetriever(self.catalog, self.config)
-        self.clarification = ClarificationPolicy(self.catalog, self.config.clarification_pool)
+        self.clarification = ClarificationPolicy(
+            self.catalog,
+            self.config.clarification_pool,
+            other_start_turn=self.config.clarification_other_start_turn,
+            other_multiplier=self.config.clarification_other_multiplier,
+            other_routes=self.config.clarification_other_routes,
+        )
         self.sessions: dict[str, SessionState] = {}
         self.traces: dict[str, list[TraceEvent]] = {}
         self._session_order: list[str] = []

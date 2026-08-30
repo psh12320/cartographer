@@ -1,21 +1,25 @@
 {
   "sample_count": 200,
   "hit_rate_at_10": 1.0,
-  "mrr": 0.636558,
-  "mttc": 2.26,
-  "efficiency": 0.874,
-  "recommended_technical_score": 0.865767,
+  "mrr": 0.690885,
+  "mttc": 2.18,
+  "efficiency": 0.882,
+  "recommended_technical_score": 0.883665,
   "reported_token_usage": {
     "prompt_tokens": 0,
     "completion_tokens": 0,
     "total_tokens": 0
   },
   "scenario_metrics": {
-    "boundary": {"sample_count": 10, "hit_rate_at_10": 1.0, "mrr": 0.673571, "mttc": 3.0},
-    "browsing": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.699802, "mttc": 2.2},
-    "buying": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.589122, "mttc": 1.65},
-    "intent_override": {"sample_count": 30, "hit_rate_at_10": 1.0, "mrr": 0.582063, "mttc": 3.8}
+    "boundary": {"sample_count": 10, "hit_rate_at_10": 1.0, "mrr": 0.542778, "mttc": 3.0},
+    "browsing": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.741726, "mttc": 2.075},
+    "buying": {"sample_count": 80, "hit_rate_at_10": 1.0, "mrr": 0.687991, "mttc": 1.6125},
+    "intent_override": {"sample_count": 30, "hit_rate_at_10": 1.0, "mrr": 0.612394, "mttc": 3.7}
   },
   "command": "python -m evaluator.local_evaluator --output results.json",
-  "semantic_routes_enabled": false
+  "semantic_routes_enabled": false,
+  "protected_checkpoint": {
+    "git_tag": "checkpoint-0.865767",
+    "recommended_technical_score": 0.865767
+  }
 }

@@ -32,6 +32,12 @@ class AgentConfig:
     max_retained_sessions: int = 64
     hard_filter_minimum: int = 10
     rrf_k: int = 60
+    clarification_other_start_turn: int = 1
+    clarification_other_multiplier: float = 1.0
+    clarification_other_routes: tuple[str, ...] = ("buying", "browsing")
+    buying_popularity_multiplier: float = 3.0
+    popularity_rating_mix: float = 1.0
+    suppress_textual_profile_after_override: bool = True
     enable_fts: bool = True
     enable_category: bool = True
     enable_fingerprints: bool = True

@@ -9,7 +9,7 @@ from .config import AgentConfig
 from .dialog import profile_attributes
 from .models import SearchHit, SessionState
 from .semantic import CrossEncoderReranker, SemanticRetriever
-from .text import canonical, token_overlap
+from .text import canonical, terms, token_overlap
 
 
 @dataclass
@@ -32,6 +32,7 @@ class HybridRetriever:
         signature = (
             state.route,
             canonical(state.category),
+            canonical(state.active_query_text),
             tuple((constraint.attribute, canonical(constraint.value), constraint.strength) for constraint in state.active_constraints),
         )
         if signature == state.last_query_signature and state.cached_hits:
@@ -40,11 +41,19 @@ class HybridRetriever:
             state.cached_hits = unseen + seen
             return RetrievalResult(state.cached_hits, len(state.cached_hits), True)
 
-        query_parts = [state.category, *(constraint.value for constraint in state.active_constraints)]
-        query = " ".join(part for part in query_parts if part).strip()
-        lexical = self.catalog.lexical_search(query, self.config.lexical_limit) if self.config.enable_fts else []
+        structured_query = " ".join(
+            part
+            for part in [state.category, *(constraint.value for constraint in state.active_constraints)]
+            if part
+        ).strip()
+        semantic_query = state.active_query_text or structured_query
+        lexical = (
+            self.catalog.lexical_search(structured_query, self.config.lexical_limit)
+            if self.config.enable_fts
+            else []
+        )
         lexical_ranks = {product_index: rank for rank, product_index in enumerate(lexical, start=1)}
-        dense = self.semantic.search(query, self.config.dense_limit)
+        dense = self.semantic.search(semantic_query, self.config.dense_limit)
         dense_scores = dict(dense)
         category_all = (
             self.catalog.category_indices(state.category, None)
@@ -126,6 +135,13 @@ class HybridRetriever:
             candidate_indices = limited
 
         profile_keys = profile_attributes(state.user_profile)
+        profile_text = " ".join(
+            [
+                *(str(value) for value in state.user_profile.get("preference_tags") or []),
+                str(state.user_profile.get("summary") or ""),
+            ]
+        )
+        profile_terms = set(terms(profile_text, 40))
         hits: list[SearchHit] = []
         for product_index in candidate_indices:
             product = self.catalog.products[product_index]
@@ -135,11 +151,24 @@ class HybridRetriever:
             bm25_score = self._rrf_feature(lexical_ranks.get(product_index))
             dense_score = max(0.0, min(1.0, (dense_scores.get(product_index, -1.0) + 1.0) / 2.0))
             product_attributes = set(product.by_attribute)
-            profile_score = (
+            attribute_profile_score = (
                 len(profile_keys & product_attributes) / len(profile_keys) if profile_keys else 0.0
             )
-            popularity = (
-                (product.average_rating / 5.0) * min(1.0, math.log1p(product.rating_number) / 10.0)
+            padded_product_text = f" {product.search_key} "
+            textual_profile_score = (
+                sum(f" {term} " in padded_product_text for term in profile_terms) / len(profile_terms)
+                if profile_terms
+                else 0.0
+            )
+            if self.config.suppress_textual_profile_after_override and state.intent_epoch > 0:
+                profile_score = attribute_profile_score
+            else:
+                profile_score = 0.75 * textual_profile_score + 0.25 * attribute_profile_score
+            review_volume = min(1.0, math.log1p(product.rating_number) / 10.0)
+            rating_quality = product.average_rating / 5.0
+            popularity = review_volume * (
+                (1.0 - self.config.popularity_rating_mix)
+                + self.config.popularity_rating_mix * rating_quality
             )
             weights = self.config.weights
             if state.route == "buying":
@@ -149,6 +178,7 @@ class HybridRetriever:
                 bm25_weight = weights.bm25
                 dense_weight = weights.dense * 0.80
                 profile_weight = weights.profile * 0.80
+                popularity_weight = weights.popularity * self.config.buying_popularity_multiplier
             else:
                 exact_weight = weights.exact_fingerprint
                 coverage_weight = weights.constraint_coverage
@@ -156,6 +186,7 @@ class HybridRetriever:
                 bm25_weight = weights.bm25 * 0.95
                 dense_weight = weights.dense * 1.20
                 profile_weight = weights.profile * 1.20
+                popularity_weight = weights.popularity
             score = (
                 exact_weight * exact_count
                 + coverage_weight * constraint_score
@@ -163,7 +194,7 @@ class HybridRetriever:
                 + bm25_weight * bm25_score
                 + dense_weight * dense_score
                 + profile_weight * profile_score
-                + weights.popularity * popularity
+                + popularity_weight * popularity
             )
             if product.parent_asin in state.override_shortlist:
                 # Reconsider earlier options under the corrected constraint instead of losing them.
@@ -183,10 +214,10 @@ class HybridRetriever:
             )
 
         hits.sort(key=lambda hit: (-hit.score, hit.parent_asin))
-        if self.cross_encoder.enabled and query:
+        if self.cross_encoder.enabled and semantic_query:
             rerank_count = min(40, len(hits))
             documents = [self.catalog.products[hit.product_index].search_text for hit in hits[:rerank_count]]
-            scores = self.cross_encoder.score(query, documents)
+            scores = self.cross_encoder.score(semantic_query, documents)
             for hit, cross_score in zip(hits[:rerank_count], scores):
                 hit.cross_encoder_score = cross_score
                 hit.score += self.config.weights.cross_encoder * cross_score

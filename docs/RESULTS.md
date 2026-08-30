@@ -6,22 +6,23 @@
 |---|---:|---:|---:|---:|---:|
 | Organizer BM25 starter | 0.125 | 0.068034 | 9.81 | 0.119 | 0.106710 |
 
-## Cartographer frozen run
+## Cartographer current offline run
 
 Run the full 200-session official evaluator with `python -m evaluator.local_evaluator --output results.json`.
 
 | System | Hit Rate@10 | MRR | MTTC | Efficiency | TechnicalScore |
 |---|---:|---:|---:|---:|---:|
-| Cartographer, deterministic frozen config | **1.000** | **0.636558** | **2.26** | **0.874** | **0.865767** |
+| Cartographer, current offline config | **1.000** | **0.690885** | **2.18** | **0.882** | **0.883665** |
+| Protected checkpoint `checkpoint-0.865767` | 1.000 | 0.636558 | 2.26 | 0.874 | 0.865767 |
 
 | Scenario | Sessions | Hit Rate@10 | MRR | MTTC |
 |---|---:|---:|---:|---:|
-| Buying | 80 | 1.000 | 0.589122 | 1.65 |
-| Browsing | 80 | 1.000 | 0.699802 | 2.20 |
-| Intent Override | 30 | 1.000 | 0.582063 | 3.80 |
-| Boundary | 10 | 1.000 | 0.673571 | 3.00 |
+| Buying | 80 | 1.000 | 0.687991 | 1.6125 |
+| Browsing | 80 | 1.000 | 0.741726 | 2.075 |
+| Intent Override | 30 | 1.000 | 0.612394 | 3.70 |
+| Boundary | 10 | 1.000 | 0.542778 | 3.00 |
 
-The untouched organizer evaluator produced the same aggregate as the bounded four-shard verification run. Cartographer improves TechnicalScore by `0.759057` absolute, or approximately `8.11×`, over the published starter.
+The untouched organizer evaluator reports a `0.017898` absolute improvement over the protected checkpoint before semantic embeddings are enabled. The current offline configuration improves TechnicalScore by `0.776955` absolute, or approximately `8.28×`, over the published starter.
 
 ## Reproducibility notes
 
@@ -47,6 +48,6 @@ The dense row is identical because semantic model assets were intentionally abse
 
 ## Performance and model gates
 
-On the fixed 20-session engineering slice, the frozen route completed initialization plus evaluation in `47.889 s`. Across 48 agent turns, mean latency was `256.262 ms`, p50 was `254.715 ms`, p95 was `562.459 ms`, and the maximum was `754.542 ms`. The observed full-evaluator process working set remained below `461 MiB`, including the evaluator's own duplicate catalog structures.
+The protected checkpoint's fixed 20-session engineering run completed initialization plus evaluation in `47.889 s`. Across 48 agent turns, mean latency was `256.262 ms`, p50 was `254.715 ms`, p95 was `562.459 ms`, and the maximum was `754.542 ms`. The observed full-evaluator process working set remained below `461 MiB`, including the evaluator's own duplicate catalog structures. The current configuration will receive a fresh latency run before final freezing.
 
-The verified local BGE model loaded successfully, but its first 128-document CPU batch required `56.62 s`, projecting roughly six hours for the 391-batch catalog build on the test host. It therefore failed the project's practicality gate and is disabled in the frozen configuration. The optional setup remains available for faster hardware or overnight preprocessing; the cross-encoder was not evaluated after the prerequisite dense route failed.
+The verified local BGE model loaded successfully, but its first 128-document CPU batch required `56.62 s`, projecting roughly six hours for the 391-batch catalog build on the test host. A checksummed GPU handoff now generates this artifact offline; semantic scores remain excluded from every result above until that artifact is imported and re-evaluated. The cross-encoder has not yet been promoted.

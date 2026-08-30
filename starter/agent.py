@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cartographer.catalog import CatalogIndex
 from cartographer.config import AgentConfig
 from cartographer.engine import CartographerEngine
 
@@ -13,8 +14,9 @@ class Agent:
         self,
         catalog_path: str | Path = "data/catalog.jsonl",
         config: AgentConfig | None = None,
+        catalog_index: CatalogIndex | None = None,
     ) -> None:
-        self.engine = CartographerEngine(catalog_path, config=config)
+        self.engine = CartographerEngine(catalog_path, config=config, catalog_index=catalog_index)
 
     def reset(self, session_id: str, user_profile: dict) -> None:
         self.engine.reset(session_id, user_profile)

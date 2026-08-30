@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from cartographer.config import AgentConfig
 from cartographer.dialog import DialogManager
 from cartographer.engine import CartographerEngine
 from cartographer.models import SearchHit, SessionState
+from cartographer.semantic import file_sha256, verify_bge_embeddings
 from cartographer.text import canonical, classify_constraint, intent_fingerprint
 
 
@@ -89,6 +91,44 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual([canonical(item.value) for item in state.active_constraints], ["wool"])
         self.assertEqual(state.override_shortlist, {"A"})
         self.assertEqual(state.seen_products, set())
+        self.assertNotIn("cotton", canonical(state.active_query_text))
+        self.assertIn("wool", canonical(state.active_query_text))
+
+    def test_full_active_query_accumulates_and_resets_by_epoch(self) -> None:
+        manager = DialogManager()
+        state = SessionState("session", {})
+        manager.update(state, "I need a trail shirt for humid weather.", 1)
+        manager.update(state, "Breathability and quick drying matter most.", 2)
+        self.assertIn("humid weather", state.active_query_text)
+        self.assertIn("quick drying", state.active_query_text)
+        manager.update(
+            state,
+            "Actually, ignore my earlier preference. What I need instead is: a formal office shirt.",
+            3,
+        )
+        self.assertNotIn("humid weather", state.active_query_text)
+        self.assertIn("formal office shirt", state.active_query_text)
+        self.assertEqual(
+            [canonical(item.value) for item in state.active_constraints],
+            ["a formal office shirt"],
+        )
+
+    def test_dialog_handles_paraphrased_category_override_and_boundary(self) -> None:
+        manager = DialogManager()
+        state = SessionState("session", {})
+        manager.update(state, "I'm shopping for trail shoes, but I am still exploring.", 1)
+        self.assertEqual(state.category, "trail shoes")
+        state.last_asked = "color"
+        manager.update(state, "Any color is fine.", 2)
+        self.assertIn("color", state.declined_attributes)
+        manager.update(state, "I changed my mind. What I need instead is: waterproof boots.", 3)
+        self.assertEqual(state.intent_epoch, 1)
+        self.assertEqual(state.route, "buying")
+        self.assertEqual(state.category, "trail shoes")
+        self.assertEqual(
+            [canonical(item.value) for item in state.active_constraints],
+            ["waterproof boots"],
+        )
 
     def test_entropy_policy_prefers_discriminating_feature(self) -> None:
         catalog = CatalogIndex(self.catalog_path, self.root / "index")
@@ -149,6 +189,36 @@ class CartographerTest(unittest.TestCase):
         self.assertNotIn("public_set", source)
         self.assertNotIn("ground_truth", source)
         self.assertNotIn("evaluator.", source)
+
+    @unittest.skipUnless(importlib.util.find_spec("numpy"), "optional numpy is not installed")
+    def test_embedding_artifact_verification_rejects_catalog_mismatch(self) -> None:
+        import numpy as np
+
+        catalog = CatalogIndex(self.catalog_path, self.root / "semantic-index")
+        index_dir = self.root / "semantic-index"
+        matrix_path = index_dir / "embeddings.npy"
+        np.save(matrix_path, np.ones((len(catalog.products), 384), dtype=np.float32))
+        model_path = index_dir / "bge-small-en-v1.5"
+        model_path.mkdir(parents=True)
+        (model_path / "config.json").write_text("{}\n", encoding="utf-8")
+        manifest = {
+            "format_version": 1,
+            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "embedding_rows": len(catalog.products),
+            "embedding_dimensions": 384,
+            "embedding_dtype": "float32",
+            "normalized": True,
+            "catalog_sha256": catalog.catalog_sha256(),
+            "asin_order_sha256": catalog.asin_order_sha256(),
+            "matrix_sha256": file_sha256(matrix_path),
+        }
+        manifest_path = index_dir / "embeddings_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertTrue(verify_bge_embeddings(catalog, index_dir)["verified"])
+        manifest["asin_order_sha256"] = "wrong"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "asin_order_sha256"):
+            verify_bge_embeddings(catalog, index_dir)
 
 
 if __name__ == "__main__":

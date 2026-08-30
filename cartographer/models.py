@@ -14,12 +14,20 @@ class Constraint:
 
 
 @dataclass
+class IntentMessage:
+    text: str
+    source_turn: int
+    epoch: int
+
+
+@dataclass
 class SessionState:
     session_id: str
     user_profile: dict
     route: str = "browsing"
     category: str = ""
     constraints: list[Constraint] = field(default_factory=list)
+    intent_messages: list[IntentMessage] = field(default_factory=list)
     intent_epoch: int = 0
     asked_attributes: set[str] = field(default_factory=set)
     declined_attributes: set[str] = field(default_factory=set)
@@ -32,6 +40,12 @@ class SessionState:
     @property
     def active_constraints(self) -> list[Constraint]:
         return [constraint for constraint in self.constraints if constraint.active]
+
+    @property
+    def active_query_text(self) -> str:
+        return " ".join(
+            item.text for item in self.intent_messages if item.epoch == self.intent_epoch
+        ).strip()
 
 
 @dataclass

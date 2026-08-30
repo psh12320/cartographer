@@ -16,6 +16,8 @@ def main() -> None:
     parser.add_argument("--with-embeddings", action="store_true")
     parser.add_argument("--with-cross-encoder", action="store_true")
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--embedding-dtype", choices=("float16", "float32"), default="float32")
     args = parser.parse_args()
 
     started = time.perf_counter()
@@ -28,7 +30,13 @@ def main() -> None:
     }
     if args.with_embeddings:
         result["embeddings"] = str(
-            build_bge_embeddings(catalog, index_dir, batch_size=args.batch_size)
+            build_bge_embeddings(
+                catalog,
+                index_dir,
+                batch_size=args.batch_size,
+                device=args.device,
+                storage_dtype=args.embedding_dtype,
+            )
         )
     if args.with_cross_encoder:
         result["cross_encoder"] = str(cache_cross_encoder(index_dir))
@@ -38,4 +46,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

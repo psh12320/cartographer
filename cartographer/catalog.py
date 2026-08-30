@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import sqlite3
 from collections import defaultdict
@@ -24,8 +25,32 @@ class CatalogIndex:
         self.asin_to_index: dict[str, int] = {}
         self.constraint_lookup: dict[str, list[int]] = defaultdict(list)
         self.category_lookup: dict[str, list[int]] = defaultdict(list)
+        self._catalog_sha256_cache: str | None = None
+        self._asin_order_sha256_cache: str | None = None
         self._load_metadata()
         self.connection = self._open_or_build_fts()
+
+    def catalog_sha256(self) -> str:
+        """Return a stable content digest for cross-machine artifact validation."""
+
+        if self._catalog_sha256_cache is None:
+            digest = hashlib.sha256()
+            with self.catalog_path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            self._catalog_sha256_cache = digest.hexdigest()
+        return self._catalog_sha256_cache
+
+    def asin_order_sha256(self) -> str:
+        """Identify the exact product-to-embedding row alignment."""
+
+        if self._asin_order_sha256_cache is None:
+            digest = hashlib.sha256()
+            for product in self.products:
+                digest.update(product.parent_asin.encode("utf-8"))
+                digest.update(b"\n")
+            self._asin_order_sha256_cache = digest.hexdigest()
+        return self._asin_order_sha256_cache
 
     def _catalog_signature(self) -> dict[str, int | str]:
         stat = self.catalog_path.stat()

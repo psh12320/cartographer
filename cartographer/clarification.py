@@ -35,9 +35,19 @@ class ClarificationDecision:
 class ClarificationPolicy:
     """Choose the next question by expected reduction in candidate entropy."""
 
-    def __init__(self, catalog: CatalogIndex, pool_size: int = 500) -> None:
+    def __init__(
+        self,
+        catalog: CatalogIndex,
+        pool_size: int = 500,
+        other_start_turn: int = 3,
+        other_multiplier: float = 0.55,
+        other_routes: tuple[str, ...] = ("buying", "browsing"),
+    ) -> None:
         self.catalog = catalog
         self.pool_size = pool_size
+        self.other_start_turn = other_start_turn
+        self.other_multiplier = other_multiplier
+        self.other_routes = frozenset(other_routes)
 
     def choose(self, state: SessionState, hits: list[SearchHit], turn: int) -> ClarificationDecision:
         if not hits or turn >= 10:
@@ -63,10 +73,17 @@ class ClarificationPolicy:
                 best_gain = gain
             typed_best = max(typed_best, gain)
 
-        allow_other = bool(state.declined_attributes) or turn >= 3 or typed_best < 0.20
+        allow_other = (
+            state.route in self.other_routes
+            and (
+                bool(state.declined_attributes)
+                or turn >= self.other_start_turn
+                or typed_best < 0.20
+            )
+        )
         if allow_other and "other" not in state.asked_attributes:
             other_gain, coverage = self._attribute_gain("other", pool, probabilities, active_values)
-            other_gain *= (0.5 + 0.5 * coverage) * 0.55
+            other_gain *= (0.5 + 0.5 * coverage) * self.other_multiplier
             if other_gain > best_gain:
                 best_attribute = "other"
                 best_gain = other_gain
@@ -123,4 +140,3 @@ class ClarificationPolicy:
     @staticmethod
     def _entropy(probabilities: list[float]) -> float:
         return -sum(value * math.log2(value) for value in probabilities if value > 0.0)
-
