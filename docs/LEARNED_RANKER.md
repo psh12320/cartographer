@@ -22,7 +22,7 @@ The generator refuses to replace an existing manifest with different membership.
 For the current offline route:
 
 ```powershell
-python -m cartographer.train_ranker --split development --routes buying,boundary,override --cross-validate --output cartographer/ranker_weights.json
+python -m cartographer.train_ranker --split development --rrf-k 120 --routes buying,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75 --cross-validate --output cartographer/ranker_weights.json
 ```
 
 After semantic screening identifies a finalist:
@@ -54,18 +54,20 @@ Before consuming the locked holdout, treat a candidate as promotion-eligible onl
 
 The fitted model's training score is intentionally not reported as evidence. Inner out-of-fold results guide development; the locked holdout is evaluated only after freezing the selected configuration.
 
-At the user's explicit methodology reset, the current fixed candidate was audited despite its two inner warnings. The disjoint holdout then improved every scenario and measured p95 well below the latency threshold, so the artifact remains enabled on that stronger one-time evidence. This exception cannot be repeated for future tuning because the holdout has now been consumed.
+At the user's explicit methodology reset, the RRF-60 candidate was audited despite its two inner warnings. The disjoint holdout then improved every scenario and measured p95 well below the latency threshold. That holdout is now consumed and cannot be reused to select or evaluate its RRF-120 successor.
 
-## Development-only and locked-holdout result
+## Development-only successor and historical holdout
 
-The selective `buying,boundary,override` model was trained on the development 100. Inner five-fold TechnicalScore improved from `0.885568` to `0.921516` (`+0.035948`); four of five folds improved. The inner gate warned that Boundary MRR regressed on only five development sessions and one fold measured `765.617 ms` p95.
+The active RRF-120 route-scaled successor achieved development OOF TechnicalScore `0.930420`, compared with `0.921516` for RRF-60. It won four folds and tied one against the predecessor. It was then fitted on all 100 development sessions; the consumed holdout was not reopened. The private 800 is the only independent confirmation for this successor.
+
+The historical RRF-60 `buying,boundary,override` model was trained on the development 100. Inner five-fold TechnicalScore improved from `0.885568` to `0.921516` (`+0.035948`); four of five folds improved. The inner gate warned that Boundary MRR regressed on only five development sessions and one fold measured `765.617 ms` p95.
 
 The model was then evaluated once on the disjoint holdout 100:
 
 | Configuration | Hit Rate@10 | MRR | MTTC | TechnicalScore | p95 latency |
 |---|---:|---:|---:|---:|---:|
 | Deterministic baseline | 1.000 | 0.683210 | 2.16 | 0.881763 | 256.248 ms |
-| Development-100 frozen reranker | 1.000 | 0.781397 | 1.91 | 0.916219 | 241.569 ms |
+| Historical RRF-60 development-100 reranker | 1.000 | 0.781397 | 1.91 | 0.916219 | 241.569 ms |
 
 The holdout gain is `+0.034456`; every scenario's TechnicalScore improved. This one-time result supersedes the earlier `0.919897` in-sample all-200 artifact, which remains recoverable at Git tag `working-0.919897` but is no longer loaded at runtime. Dense features remain zero until a semantic configuration is selected using development-only evidence and receives a new independent evaluation plan.
 

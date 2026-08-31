@@ -26,6 +26,7 @@ from starter.agent import Agent
 
 from .catalog import CatalogIndex
 from .config import AgentConfig
+from .ranker import route_key
 
 
 SESSION_HEADERS = [
@@ -387,9 +388,13 @@ class DashboardBackend:
                 hit = hit_by_asin.get(asin)
                 if hit is None:
                     continue
+                learned_scale = dict(config.learned_reranker_route_scales).get(
+                    route_key(state),
+                    config.learned_reranker_scale,
+                )
                 pre_learned = (
                     hit.score
-                    - config.learned_reranker_scale * hit.learned_score
+                    - learned_scale * hit.learned_score
                     - config.weights.cross_encoder * hit.cross_encoder_score
                 )
                 row = [

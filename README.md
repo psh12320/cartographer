@@ -77,6 +77,14 @@ python -m pip install -r requirements.txt
 python -m cartographer.build_embeddings --device cuda --batch-size 128 --dtype float32
 ```
 
+On a Windows NVIDIA laptop, the one-command path creates an isolated environment, installs CUDA PyTorch, downloads and verifies the frozen catalog when necessary, retries safe batch sizes, and verifies the completed artifact:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\generate_embeddings_gpu.ps1 -CreateArchive
+```
+
+Use `-TorchIndexUrl` if the laptop requires a different CUDA wheel index selected from the official PyTorch installer. Generated matrices, model files, and the optional transfer ZIP remain ignored by Git.
+
 The setup command saves both document embeddings and a local copy of the query encoder under `data/cartographer_index/`, validates the frozen catalog checksum and ASIN row ordering, and allows inference without network access. See [docs/GPU_EMBEDDING_HANDOFF.md](docs/GPU_EMBEDDING_HANDOFF.md) for the cross-machine workflow. To cache the experimental cross-encoder as well:
 
 ```bash
@@ -129,7 +137,7 @@ Reproduce the locked public split and development-only reranker:
 
 ```bash
 python -m cartographer.data_split
-python -m cartographer.train_ranker --split development --routes buying,boundary,override --cross-validate --output cartographer/ranker_weights.json
+python -m cartographer.train_ranker --split development --rrf-k 120 --routes buying,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75 --cross-validate --output cartographer/ranker_weights.json
 ```
 
 The holdout comparison command is documented in [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md). It is an audit command, not a tuning loop.
@@ -148,7 +156,7 @@ The response contains only `message`, `ask_attribute`, `recommendations`, and ze
 
 ## Evaluation
 
-The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. The current reranker was trained on a locked 100-session development partition and evaluated once on a disjoint 100-session holdout. It achieved Hit Rate@10 `1.000`, MRR `0.781397`, MTTC `1.91`, and TechnicalScore `0.916219`, versus `0.881763` without the reranker on the same holdout. This is an honest test of unseen fitted weights, but the broader architecture had already been engineered using all 200 public sessions before the split, so it is not a pristine end-to-end test of architecture selection. The earlier all-200 artifact is preserved only in Git history at `working-0.919897`; it is no longer the runtime model. Full scenario metrics and reproducibility notes are recorded in [docs/RESULTS.md](docs/RESULTS.md).
+The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. The active RRF-120 route-scaled reranker was trained on the locked 100-session development partition and achieved five-fold out-of-fold TechnicalScore `0.930420`, versus `0.921516` for the preceding RRF-60 reranker. It retained Hit Rate@10 `1.0` and improved or tied the predecessor in every fold. The consumed 100-session public holdout was deliberately not reopened for this successor; its last independent result, belonging to the recoverable RRF-60 checkpoint `working-holdout-0.916219`, was TechnicalScore `0.916219`. The private 800 remains the only pristine end-to-end confirmation. Full scenario metrics and methodology notes are recorded in [docs/RESULTS.md](docs/RESULTS.md) and [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
 
 The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge. Future score experiments are restricted to the development 100 and prioritized in [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
 

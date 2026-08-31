@@ -53,10 +53,19 @@ def feature_rows(hits: list[SearchHit]) -> list[dict[str, float]]:
 class LinearReranker:
     """Optional dependency-free residual ranker loaded from a transparent JSON artifact."""
 
-    def __init__(self, path: Path, enabled: bool, scale: float = 1.0) -> None:
+    def __init__(
+        self,
+        path: Path,
+        enabled: bool,
+        scale: float = 1.0,
+        route_scales: dict[str, float] | None = None,
+    ) -> None:
         self.enabled = False
         self.failure_reason: str | None = None
         self.scale = float(scale)
+        self.route_scales = {
+            str(route): float(value) for route, value in (route_scales or {}).items()
+        }
         self.routes: dict[str, dict[str, float]] = {}
         if not enabled:
             return
@@ -86,11 +95,12 @@ class LinearReranker:
     def rerank(self, hits: list[SearchHit], state: SessionState) -> list[SearchHit]:
         if not self.enabled or not hits:
             return hits
-        weights = self.routes.get(route_key(state)) or self.routes.get("default")
+        route = route_key(state)
+        weights = self.routes.get(route) or self.routes.get("default")
         if not weights:
             return hits
         for hit, features in zip(hits, feature_rows(hits)):
             residual = sum(weights[name] * features[name] for name in FEATURE_NAMES)
             hit.learned_score = residual
-            hit.score += self.scale * residual
+            hit.score += self.route_scales.get(route, self.scale) * residual
         return sorted(hits, key=lambda hit: (-hit.score, hit.parent_asin))

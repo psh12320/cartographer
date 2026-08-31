@@ -47,7 +47,7 @@ def collect_snapshots(
     shared_catalog = CatalogIndex(catalog_path, config.index_dir)
     agent = Agent(catalog_path, config=config, catalog_index=shared_catalog)
     snapshots: list[RankingSnapshot] = []
-    for sample in samples:
+    for sample_position, sample in enumerate(samples, start=1):
         sample_id = str(sample["sample_id"])
         session_id = f"ranker_{sample_id}"
         agent.reset(session_id, sample["user_profile"])
@@ -107,6 +107,12 @@ def collect_snapshots(
                     disclosed,
                     boundary_used,
                 )
+        if sample_position % 20 == 0 or sample_position == len(samples):
+            print(
+                f"[ranker] processed {sample_position}/{len(samples)} sessions; "
+                f"collected {len(snapshots)} snapshots",
+                flush=True,
+            )
     diagnostics = {
         "sample_count": len(samples),
         "snapshot_count": len(snapshots),
@@ -239,6 +245,7 @@ def cross_validate(
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for fold_index, fold in enumerate(folds):
+            print(f"[ranker] evaluating fold {fold_index + 1}/{len(folds)}", flush=True)
             held_out_ids = {str(sample["sample_id"]) for sample in fold}
             training_snapshots = [
                 snapshot for snapshot in snapshots if snapshot.sample_id not in held_out_ids
@@ -345,12 +352,20 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--learning-rate", type=float, default=0.04)
     parser.add_argument("--l2", type=float, default=0.002)
+    parser.add_argument("--rrf-k", type=int, default=120)
+    parser.add_argument("--learned-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--route-scales",
+        default="buying=1.25,boundary=0.75,override=0.75",
+        help="Optional route-specific scales, for example buying=1.25,boundary=0.75",
+    )
+    parser.add_argument("--cache-ranker-route", action="store_true")
     parser.add_argument("--with-dense", action="store_true")
     parser.add_argument("--semantic-config", default="semantic_default")
     parser.add_argument("--cross-validate", action="store_true")
     parser.add_argument(
         "--routes",
-        default="buying,browsing,boundary,override,default",
+        default="buying,boundary,override",
         help="Comma-separated routes allowed to learn; omitted routes receive zero weights",
     )
     args = parser.parse_args()
@@ -360,13 +375,29 @@ def main() -> None:
     unknown_routes = active_routes - allowed_routes
     if unknown_routes:
         parser.error(f"unknown route(s): {', '.join(sorted(unknown_routes))}")
+    route_scales: dict[str, float] = {}
+    for item in (value.strip() for value in args.route_scales.split(",")):
+        if not item:
+            continue
+        if "=" not in item:
+            parser.error(f"invalid route scale: {item}")
+        route, value = (part.strip() for part in item.split("=", 1))
+        if route not in allowed_routes:
+            parser.error(f"unknown route scale: {route}")
+        route_scales[route] = float(value)
 
     all_samples = load_jsonl(args.dataset)
     split_manifest = load_manifest(args.split_manifest, all_samples, args.dataset)
     samples = select_split(all_samples, split_manifest, args.split)
     if args.limit > 0:
         samples = samples[: args.limit]
-    base = AgentConfig(enable_learned_reranker=False)
+    base = AgentConfig(
+        enable_learned_reranker=False,
+        rrf_k=args.rrf_k,
+        learned_reranker_scale=args.learned_scale,
+        learned_reranker_route_scales=tuple(sorted(route_scales.items())),
+        include_ranker_route_in_cache_key=args.cache_ranker_route,
+    )
     if args.with_dense:
         choices = semantic_configs(base)
         if args.semantic_config not in choices or args.semantic_config == "offline_baseline":
@@ -395,6 +426,10 @@ def main() -> None:
         "epochs": args.epochs,
         "learning_rate": args.learning_rate,
         "l2": args.l2,
+        "rrf_k": args.rrf_k,
+        "learned_reranker_scale": args.learned_scale,
+        "learned_reranker_route_scales": route_scales,
+        "include_ranker_route_in_cache_key": args.cache_ranker_route,
         "semantic_config": args.semantic_config if args.with_dense else None,
         "active_routes": sorted(active_routes),
         "uses_public_labels_only_during_training": True,

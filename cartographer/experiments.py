@@ -11,6 +11,7 @@ from starter.agent import Agent
 
 from .catalog import CatalogIndex
 from .config import AgentConfig, SearchWeights
+from .data_split import file_sha256, load_manifest, select_split
 
 
 def stratified_folds(samples: list[dict], count: int = 5) -> list[list[dict]]:
@@ -114,6 +115,32 @@ def sweep_configs(base: AgentConfig) -> dict[str, AgentConfig]:
     """Small, interpretable grid focused on breaking exact-match ties."""
 
     candidates = {"baseline": base}
+    candidates["no_diversity"] = replace(base, diversify_browsing=False)
+    candidates["typed_first"] = replace(
+        base,
+        clarification_other_start_turn=3,
+        clarification_other_multiplier=0.55,
+    )
+    for multiplier in (1.5, 2.0, 4.0, 100.0):
+        candidates[f"other_{multiplier:g}"] = replace(
+            base,
+            clarification_other_start_turn=1,
+            clarification_other_multiplier=multiplier,
+        )
+    for minimum in (1, 5, 20, 50):
+        candidates[f"hard_filter_{minimum}"] = replace(
+            base,
+            hard_filter_minimum=minimum,
+        )
+    candidates["lexical_600"] = replace(base, lexical_limit=600)
+    candidates["category_1200"] = replace(base, category_limit=1200)
+    candidates["retrieval_600_1200"] = replace(
+        base,
+        lexical_limit=600,
+        category_limit=1200,
+    )
+    for rrf_k in (20, 100):
+        candidates[f"rrf_{rrf_k}"] = replace(base, rrf_k=rrf_k)
     for popularity in (0.0, 0.15, 0.35, 0.75, 1.5):
         candidates[f"pop_{popularity:g}"] = replace(
             base,
@@ -294,6 +321,15 @@ def main() -> None:
     parser.add_argument("--catalog", default="data/catalog.jsonl")
     parser.add_argument("--dataset", default="data/public_set.jsonl")
     parser.add_argument("--output", default="experiment_results.json")
+    parser.add_argument("--split-manifest", default="docs/public_split_v1.json")
+    parser.add_argument("--split", choices=("development", "all"), default="development")
+    parser.add_argument("--rrf-k", type=int, default=120)
+    parser.add_argument("--ranker-path", default="")
+    parser.add_argument(
+        "--disable-learned",
+        action="store_true",
+        help="Disable the frozen reranker while selecting retrieval and dialogue settings",
+    )
     parser.add_argument(
         "--mode",
         choices=("ablation", "tune", "sweep", "semantic"),
@@ -307,11 +343,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    samples = load_jsonl(args.dataset)
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    all_samples = load_jsonl(args.dataset)
+    split_manifest = load_manifest(args.split_manifest, all_samples, args.dataset)
+    samples = select_split(all_samples, split_manifest, args.split)
     if args.limit > 0:
         samples = samples[: args.limit]
-    base = AgentConfig(catalog_path=Path(args.catalog))
-    results: dict[str, object] = {"mode": args.mode, "sample_count": len(samples), "runs": {}}
+    base = AgentConfig(
+        catalog_path=Path(args.catalog),
+        enable_learned_reranker=not args.disable_learned,
+        rrf_k=args.rrf_k,
+    )
+    if args.ranker_path:
+        base = replace(base, ranker_path=Path(args.ranker_path))
+    results: dict[str, object] = {
+        "mode": args.mode,
+        "sample_count": len(samples),
+        "data_split": {
+            "manifest": args.split_manifest,
+            "manifest_sha256": file_sha256(args.split_manifest),
+            "partition": args.split,
+        },
+        "learned_reranker_requested": not args.disable_learned,
+        "rrf_k": args.rrf_k,
+        "ranker_path": args.ranker_path or str(base.ranker_path or ""),
+        "runs": {},
+    }
     shared_catalog = CatalogIndex(args.catalog, base.index_dir)
     evaluation_data = catalog_index(args.catalog)
     if args.mode == "ablation":
@@ -337,6 +396,7 @@ def main() -> None:
         session_results: dict[str, list[dict]] = {}
         fold_ids = [{str(sample["sample_id"]) for sample in fold} for fold in folds]
         for name, config in configurations.items():
+            print(f"[experiment] starting {name}", flush=True)
             metric = run_once(config, samples, args.catalog, shared_catalog, evaluation_data)
             session_results[name] = list(metric["sessions"])
             fold_scores = [
@@ -355,6 +415,15 @@ def main() -> None:
                 "scenario_metrics": metric["scenario_metrics"],
                 "diagnostics": metric["diagnostics"],
             }
+            output_path.write_text(
+                json.dumps(results, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"[experiment] finished {name}: "
+                f"TechnicalScore={metric['recommended_technical_score']:.6f}",
+                flush=True,
+            )
         if args.mode == "sweep":
             selected: list[str] = []
             held_out_sessions: list[dict] = []
@@ -440,7 +509,7 @@ def main() -> None:
                         key=lambda name: float(results["runs"][name]["full_technical_score"]),
                     )
             results["promotion_gate"] = promotion
-    Path(args.output).write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+    output_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(results, indent=2))
 
 

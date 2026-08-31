@@ -15,6 +15,7 @@ experiment_results.json
 ablation_results.json
 benchmark_results.json
 evaluation_shards/
+cartographer-bge-artifacts.zip
 # Organizer-only code, private evaluation data, manifests, and build reports.
 organizer/
 secure/

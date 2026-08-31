@@ -2,6 +2,16 @@
 
 This task generates Cartographer's 50,000 normalized BGE product embeddings. The output is portable across machines and is rejected automatically if it was built from a different catalog or product ordering.
 
+## One-command Windows path
+
+From a fresh checkout on an NVIDIA laptop, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\generate_embeddings_gpu.ps1 -CreateArchive
+```
+
+The script creates `.venv-embed`, installs a CUDA PyTorch wheel and the declared dependencies, downloads and checksums the official catalog if it is missing, verifies CUDA, retries batch sizes down to 32, validates the final matrix, and creates `cartographer-bge-artifacts.zip`. If the default CUDA 12.6 wheel is unsuitable for the installed driver, pass the wheel index chosen at <https://pytorch.org/get-started/locally/> using `-TorchIndexUrl`.
+
 ## 1. Check out the checkpoint and obtain the catalog
 
 Use the latest shared branch containing `cartographer/build_embeddings.py`. Do not modify or reorder `data/catalog.jsonl`.

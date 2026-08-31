@@ -15,17 +15,17 @@
   ],
   "routes": {
     "buying": {
-      "base_score": 0.18764865628443558,
-      "exact_matches": 1.5420187356635928,
-      "constraint_score": 1.2492424577197285,
-      "category_score": 2.774076270569053,
-      "bm25_score": 0.7048808847225441,
+      "base_score": 0.1857414080428718,
+      "exact_matches": 1.5589899873329627,
+      "constraint_score": 1.2465229300067462,
+      "category_score": 2.6695780127829902,
+      "bm25_score": 0.836839271452148,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": 0.6530601528338914,
-      "popularity_score": 5.623755004687392
+      "profile_score": 0.6523650909321846,
+      "popularity_score": 5.667902548338497
     },
     "browsing": {
       "base_score": 0.0,
@@ -41,30 +41,30 @@
       "popularity_score": 0.0
     },
     "boundary": {
-      "base_score": -0.2601821819355672,
-      "exact_matches": 0.9979377749503429,
-      "constraint_score": 1.7586885730823754,
-      "category_score": 2.910883720015132,
-      "bm25_score": -1.304159409921214,
+      "base_score": -0.23554636773253457,
+      "exact_matches": 0.9471902351628371,
+      "constraint_score": 1.7281561718353622,
+      "category_score": 2.849123486586433,
+      "bm25_score": -1.1399922210552147,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": 0.4900812206777006,
-      "popularity_score": 5.746546565483819
+      "profile_score": 0.4957522376556803,
+      "popularity_score": 5.738658497850727
     },
     "override": {
-      "base_score": 0.3754966362094554,
-      "exact_matches": 1.4426002720430062,
+      "base_score": 0.4008150938602544,
+      "exact_matches": 1.7354641226664818,
       "constraint_score": 0.0,
-      "category_score": 2.798710881826763,
-      "bm25_score": -0.4380413658387532,
+      "category_score": 2.6758241633636537,
+      "bm25_score": -0.17531419366755094,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": -1.1344791954111524,
-      "popularity_score": 6.598144552279858
+      "profile_score": -1.2077169521289066,
+      "popularity_score": 6.565534505086483
     },
     "default": {
       "base_score": 0.0,
@@ -82,9 +82,9 @@
   },
   "training": {
     "sample_count": 100,
-    "snapshot_count": 183,
+    "snapshot_count": 182,
     "route_snapshots": {
-      "buying": 108,
+      "buying": 107,
       "browsing": 45,
       "boundary": 13,
       "override": 17
@@ -92,7 +92,7 @@
     "dense_enabled": false,
     "dense_failure_reason": null,
     "pair_counts": {
-      "buying": 3240,
+      "buying": 3210,
       "browsing": 0,
       "boundary": 390,
       "override": 510,
@@ -101,6 +101,14 @@
     "epochs": 60,
     "learning_rate": 0.04,
     "l2": 0.002,
+    "rrf_k": 120,
+    "learned_reranker_scale": 1.0,
+    "learned_reranker_route_scales": {
+      "buying": 1.25,
+      "boundary": 0.75,
+      "override": 0.75
+    },
+    "include_ranker_route_in_cache_key": false,
     "semantic_config": null,
     "active_routes": [
       "boundary",
@@ -119,23 +127,23 @@
     },
     "cross_validation": {
       "baseline_fold_scores": [
-        0.8495537000000001,
-        0.9345,
-        0.8883928999999999,
-        0.8815001,
-        0.873893
+        0.8538035,
+        0.9223750000000001,
+        0.901643,
+        0.9152501,
+        0.8875001
       ],
       "fold_scores": [
         0.9306429,
-        0.9473750000000001,
-        0.8849166,
-        0.92,
-        0.9246429999999999
+        0.954875,
+        0.8903334,
+        0.9337500999999999,
+        0.9424999000000001
       ],
-      "mean_fold_score": 0.9215154999999999,
-      "baseline_technical_score": 0.885568,
-      "out_of_fold_technical_score": 0.9215155,
-      "out_of_fold_gain": 0.035948,
+      "mean_fold_score": 0.93042026,
+      "baseline_technical_score": 0.8961144,
+      "out_of_fold_technical_score": 0.9304202,
+      "out_of_fold_gain": 0.034306,
       "out_of_fold_session_count": 100,
       "stable_folds": 4,
       "baseline_scenario_metrics": {
@@ -148,19 +156,19 @@
         "browsing": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.717381,
+          "mrr": 0.761131,
           "mttc": 2.075
         },
         "buying": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.688155,
-          "mttc": 1.675
+          "mrr": 0.718125,
+          "mttc": 1.65
         },
         "intent_override": {
           "sample_count": 15,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.625635,
+          "mrr": 0.658968,
           "mttc": 3.6
         }
       },
@@ -168,37 +176,34 @@
         "boundary": {
           "sample_count": 5,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.82,
-          "mttc": 3.0
+          "mrr": 1.0,
+          "mttc": 3.2
         },
         "browsing": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.862321,
+          "mrr": 0.860933,
           "mttc": 1.925
         },
         "buying": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.720308,
+          "mrr": 0.770903,
           "mttc": 1.075
         },
         "intent_override": {
           "sample_count": 15,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.815556,
+          "mrr": 0.826667,
           "mttc": 3.466667
         }
       },
-      "maximum_fold_p95_latency_ms": 765.617,
+      "maximum_fold_p95_latency_ms": 543.443,
       "promotion": {
-        "eligible": false,
+        "eligible": true,
         "minimum_gain": 0.005,
         "required_stable_folds": 4,
-        "blockers": [
-          "observed held-out p95 latency exceeds 750 ms",
-          "boundary MRR regressed by more than 0.02"
-        ]
+        "blockers": []
       }
     }
   }

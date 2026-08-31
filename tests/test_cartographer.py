@@ -340,6 +340,46 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual(route_key(browsing), "browsing")
         self.assertEqual(route_key(boundary), "boundary")
 
+    def test_linear_reranker_applies_route_specific_scales(self) -> None:
+        index_dir = self.root / "route-scale-index"
+        index_dir.mkdir()
+        weights = {name: 0.0 for name in FEATURE_NAMES}
+        weights["bm25_score"] = 3.0
+        (index_dir / "ranker.json").write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "feature_names": list(FEATURE_NAMES),
+                    "routes": {"buying": weights, "boundary": weights},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ranker = LinearReranker(
+            index_dir / "ranker.json",
+            enabled=True,
+            route_scales={"buying": 0.0, "boundary": 1.0},
+        )
+        buying_hits = [
+            SearchHit(0, "A", 1.0, bm25_score=0.1),
+            SearchHit(1, "B", 1.0, bm25_score=0.9),
+        ]
+        boundary_hits = [
+            SearchHit(0, "A", 1.0, bm25_score=0.1),
+            SearchHit(1, "B", 1.0, bm25_score=0.9),
+        ]
+        self.assertEqual(
+            ranker.rerank(buying_hits, SessionState("buying", {}, route="buying"))[0].parent_asin,
+            "A",
+        )
+        self.assertEqual(
+            ranker.rerank(
+                boundary_hits,
+                SessionState("boundary", {}, route="browsing", declined_attributes={"color"}),
+            )[0].parent_asin,
+            "B",
+        )
+
     def test_pairwise_trainer_learns_positive_feature_direction(self) -> None:
         zero = {name: 0.0 for name in FEATURE_NAMES}
         positive = dict(zero)

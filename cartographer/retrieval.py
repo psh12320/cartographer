@@ -8,7 +8,7 @@ from .catalog import CatalogIndex
 from .config import AgentConfig
 from .dialog import profile_attributes
 from .models import SearchHit, SessionState
-from .ranker import LinearReranker
+from .ranker import LinearReranker, route_key
 from .semantic import CrossEncoderReranker, SemanticRetriever
 from .text import canonical, terms, token_overlap
 
@@ -32,11 +32,13 @@ class HybridRetriever:
             config.ranker_path or config.index_dir / "ranker.json",
             config.enable_learned_reranker,
             config.learned_reranker_scale,
+            dict(config.learned_reranker_route_scales),
         )
 
     def search(self, state: SessionState) -> RetrievalResult:
         signature = (
             state.route,
+            route_key(state) if self.config.include_ranker_route_in_cache_key else "",
             canonical(state.category),
             canonical(state.active_query_text),
             tuple((constraint.attribute, canonical(constraint.value), constraint.strength) for constraint in state.active_constraints),

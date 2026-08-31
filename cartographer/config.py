@@ -38,7 +38,7 @@ class AgentConfig:
     clarification_pool: int = 500
     max_retained_sessions: int = 64
     hard_filter_minimum: int = 10
-    rrf_k: int = 60
+    rrf_k: int = 120
     clarification_other_start_turn: int = 1
     clarification_other_multiplier: float = 1.0
     clarification_other_routes: tuple[str, ...] = ("buying", "browsing")
@@ -55,6 +55,12 @@ class AgentConfig:
     verify_embedding_checksum_on_load: bool = True
     warm_semantic_encoder: bool = True
     learned_reranker_scale: float = 1.0
+    learned_reranker_route_scales: tuple[tuple[str, float], ...] = (
+        ("boundary", 0.75),
+        ("buying", 1.25),
+        ("override", 0.75),
+    )
+    include_ranker_route_in_cache_key: bool = False
     enable_fts: bool = True
     enable_category: bool = True
     enable_fingerprints: bool = True

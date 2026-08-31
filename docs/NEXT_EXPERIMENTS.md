@@ -14,6 +14,45 @@ The locked public holdout has been consumed. Every experiment below must be sele
 
 These are audit observations, not parameters to optimize against. The architecture itself had already been developed on all 200 public sessions before the split, so the private 800 remains the only pristine end-to-end test.
 
+## Development experiment pass: 2026-08-31
+
+This pass used only the 100-session `development` partition. The consumed public holdout was not opened, and no result from this pass was pushed. The frozen RRF-60 reranker (`0.921516` development OOF) was the comparison point.
+
+| Experiment | Development score | Decision |
+| --- | ---: | --- |
+| Deterministic RRF-60 reference | `0.885568` | Reference |
+| Deterministic RRF-100 | `0.896068` | Won all five fold-wise selections; carry forward |
+| Frozen learned RRF-60 | `0.921516` OOF | Previous champion |
+| Learned RRF-80 | `0.923337` OOF | Better, but below local optimum |
+| Learned RRF-100 | `0.925765` OOF | Better, but below local optimum |
+| Learned RRF-120 | `0.927169` OOF | Best RRF constant tested |
+| Learned RRF-160 | `0.921349` OOF | Rejected |
+| Learned RRF-200 | `0.923032` OOF | Rejected |
+| RRF-120, global scale `0.75` | `0.923590` OOF | Rejected |
+| RRF-120, global scale `1.25` | `0.927570` OOF | Tiny gain with route regressions |
+| RRF-120, route scales | **`0.930420` OOF** | Local challenger |
+
+The route-scaled challenger uses `buying=1.25`, `boundary=0.75`, `override=0.75`, and no learned Browsing/default residual. It retained Hit Rate@10 `1.0`, matched or beat the deterministic reference in four of five folds, and produced the following OOF scenario metrics:
+
+| Scenario | MRR | MTTC |
+| --- | ---: | ---: |
+| Boundary | `1.000000` | `3.200000` |
+| Browsing | `0.860933` | `1.925000` |
+| Buying | `0.770903` | `1.075000` |
+| Intent Override | `0.826667` | `3.466667` |
+
+Its maximum sequential fold p95 latency was `543.443 ms`; the promoted default configuration measured `380.588 ms` p95 in a separate warm full-development run. Scores from full-development runs using an all-development-trained artifact are not selection evidence and are retained only for latency diagnostics.
+
+Other findings:
+
+- Delaying `other` in favor of typed questions scored `0.878098`; globally forcing `other` scored `0.875109` and reduced Hit Rate to `0.99`. Keep the balanced entropy policy.
+- Disabling Browsing diversification tied overall at `0.885568` but shifted scenario results; nested selection fell to `0.871201`. Keep the current policy.
+- Adding the Boundary ranker phase to the cache key scored `0.919416` OOF, below the frozen model. Do not promote it as a scoring change.
+- RRF-20 (`0.870107`), popularity removal (`0.861530`), BM25 weight 3 (`0.877152`), and larger lexical/category pools (approximately flat) were rejected.
+- The BGE matrix and manifest were still absent, so no semantic result was fabricated or inferred.
+
+The route-scaled RRF-120 candidate is installed only in the local working tree. The prior checkpoint remains the recovery point. Because the public holdout is consumed, the private organizer evaluation is the only independent end-to-end confirmation.
+
 ## P0: Make development diagnostics source-aware
 
 Before changing ranking, record the following on development folds only:

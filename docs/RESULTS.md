@@ -6,9 +6,9 @@
 |---|---:|---:|---:|---:|---:|
 | Organizer BM25 starter | 0.125 | 0.068034 | 9.81 | 0.119 | 0.106710 |
 
-## Locked 100-session holdout
+## Historical locked 100-session holdout
 
-The current artifact was trained on the development half defined by `docs/public_split_v1.json` and evaluated once on the disjoint holdout half. Both halves preserve the official 40/40/15/5 scenario mix.
+The preceding RRF-60 artifact was trained on the development half defined by `docs/public_split_v1.json` and evaluated once on the disjoint holdout half. Both halves preserve the official 40/40/15/5 scenario mix. This holdout is now consumed and was not used to select or evaluate the active RRF-120 successor.
 
 | System | Hit Rate@10 | MRR | MTTC | Efficiency | TechnicalScore |
 |---|---:|---:|---:|---:|---:|
@@ -26,7 +26,7 @@ The development-only reranker improved holdout TechnicalScore by `0.034456`, MRR
 
 This split was created after the architecture and route choices had already been developed against the full public set. The holdout therefore tests whether newly fitted 100-session weights transfer to disjoint sessions, but it is not a pristine estimate of the entire architecture-selection process. Only the private 800 can provide that final independent test.
 
-The development-only artifact SHA-256 is `0a464d7c78020cc8a30c94f524043cbe705eab9365030b8fb0f39fda572e7bf2`; the split-manifest SHA-256 is `2e92573ca1275da9243135fd1dd0899138f0db971d52c08a3d9810ceb3d0169b`. Buying, Boundary, and Override runtime routes learn residual weights; ordinary Browsing and fallback routes store explicit zero weights. The historical all-200 model and its `0.919897` in-sample result remain at Git tag `working-0.919897`, not in the current runtime artifact.
+The active development-only RRF-120 artifact SHA-256 is `464d2daa3c0862c049fd497439d3133cc6d1ea18eb7ad6153271bd70e4b0d884`; the split-manifest SHA-256 is `2e92573ca1275da9243135fd1dd0899138f0db971d52c08a3d9810ceb3d0169b`. Its five-fold development OOF TechnicalScore is `0.930420`. Buying, Boundary, and Override routes learn residual weights with scales `1.25`, `0.75`, and `0.75`; ordinary Browsing and fallback routes store explicit zero weights. The RRF-60 holdout artifact remains recoverable at `working-holdout-0.916219`.
 
 ## Reproducibility notes
 
@@ -54,6 +54,6 @@ The dense row is identical because semantic model assets were intentionally abse
 
 ## Performance and model gates
 
-On the locked holdout, the candidate's 126 warm turns averaged `125.833 ms`, with p95 `241.569 ms` and maximum `822.621 ms`. Catalog construction is excluded from those turn timings. The preceding checkpoint's clean-start benchmark initialized in `51.514 s` and observed a development process working set below `461 MiB`; the exact final submission still requires a clean-checkout cold-start benchmark.
+The active RRF-120 candidate's maximum sequential inner-fold p95 was `543.443 ms`; a separate warm run through the promoted default measured mean `144.421 ms`, p95 `380.588 ms`, and maximum `633.244 ms`. Scores from the all-development-trained warm run are not selection evidence. The historical RRF-60 holdout run measured p95 `241.569 ms`. Catalog construction is excluded from turn timings.
 
 The verified local BGE model loaded successfully, but its first 128-document CPU batch required `56.62 s`, projecting roughly six hours for the 391-batch catalog build on the test host. A checksummed GPU handoff now generates this artifact offline; semantic scores remain excluded from every result above until that artifact is imported and re-evaluated. The cross-encoder has not yet been promoted.
