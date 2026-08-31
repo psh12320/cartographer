@@ -32,6 +32,59 @@ from .ranker import route_key
 
 DEFAULT_EXTRA_DATASETS = ("synthetic_800_v1.jsonl",)
 
+COMPONENT_SPECS: dict[str, dict[str, str]] = {
+    "fts": {
+        "label": "Lexical FTS5 / BM25",
+        "evidence": "Candidate recall and exact wording match",
+    },
+    "category": {
+        "label": "Category retrieval route",
+        "evidence": "Broad catalog coverage when wording is sparse",
+    },
+    "fingerprints": {
+        "label": "Intent fingerprints + safe hard filtering",
+        "evidence": "Exact structured requirement matching",
+    },
+    "state": {
+        "label": "Multi-turn intent state",
+        "evidence": "Accumulated constraints, boundaries, and overrides",
+    },
+    "clarification": {
+        "label": "Entropy-guided clarification",
+        "evidence": "Value of asking the next question",
+    },
+    "profile": {
+        "label": "Safe profile personalization",
+        "evidence": "Aggregate-profile ranking and question priority",
+    },
+    "popularity": {
+        "label": "Rating / review popularity prior",
+        "evidence": "Catalog-quality tie breaking",
+    },
+    "reranker": {
+        "label": "Frozen learned reranker",
+        "evidence": "Target ordering after deterministic retrieval",
+    },
+    "gate": {
+        "label": "Precision recommendation-depth gate",
+        "evidence": "Trade one turn for a stronger conversion rank",
+    },
+    "diversity": {
+        "label": "Browsing diversification",
+        "evidence": "Coverage across near-duplicate product families",
+    },
+    "dense": {
+        "label": "Optional BGE dense route",
+        "evidence": "Semantic candidate recall when verified assets load",
+    },
+}
+
+COMPONENT_CHOICES = [
+    (spec["label"], key)
+    for key, spec in COMPONENT_SPECS.items()
+]
+DEFAULT_SESSION_ABLATIONS = ["reranker", "gate"]
+
 SESSION_HEADERS = [
     "Session",
     "Scenario",
@@ -60,6 +113,9 @@ TURN_HEADERS = [
     "Target recommendation rank",
     "Entropy",
     "Information gain",
+    "Returned depth",
+    "Gate active",
+    "Gate reason",
     "Latency ms",
     "Cache hit",
 ]
@@ -86,10 +142,12 @@ PRODUCT_HEADERS = [
     "Popularity",
     "Learned residual",
     "Cross-encoder",
+    "Dominant score contributions",
 ]
 
 COMPARISON_HEADERS = [
     "Variant",
+    "Removed component",
     "Scope",
     "Sessions",
     "Hit Rate@10",
@@ -97,21 +155,41 @@ COMPARISON_HEADERS = [
     "MTTC",
     "Efficiency",
     "TechnicalScore",
+    "TechnicalScore delta vs full",
+    "MRR delta vs full",
+    "MTTC delta vs full",
     "Mean latency ms",
     "p95 latency ms",
     "Dense loaded",
     "Reranker loaded",
+    "Depth gate configured",
 ]
 
 SESSION_COMPARISON_HEADERS = [
+    "Removed component",
     "Session",
     "Scenario",
-    "Baseline turn",
-    "Baseline rank",
-    "Reranker turn",
-    "Reranker rank",
-    "Turn improvement",
-    "Reciprocal-rank improvement",
+    "Full-agent turn",
+    "Full-agent rank",
+    "Ablated turn",
+    "Ablated rank",
+    "Full minus ablated contribution",
+    "Turn advantage (ablated - full)",
+    "RR advantage (full - ablated)",
+]
+
+SESSION_OUTCOME_HEADERS = [
+    "Metric",
+    "Full agent",
+    "Selected ablation",
+    "Full-agent advantage",
+]
+
+COMPONENT_STATUS_HEADERS = [
+    "Component",
+    "Full agent",
+    "Ablated run",
+    "Evidence exposed",
 ]
 
 LIVE_SCENARIO_HEADERS = [
@@ -170,6 +248,69 @@ def _technical_score(summary: dict[str, Any]) -> tuple[float, float]:
         + 0.20 * efficiency
     )
     return efficiency, score
+
+
+def _session_contribution(session: dict[str, Any]) -> float:
+    """The exact per-session contribution implied by the official aggregate formula."""
+
+    turn = int(session.get("first_hit_turn") or 11)
+    return (
+        0.50 * float(bool(session.get("hit")))
+        + 0.30 * float(session.get("reciprocal_rank") or 0.0)
+        + 0.02 * (11.0 - float(turn))
+    )
+
+
+def _component_label(key: str) -> str:
+    return COMPONENT_SPECS.get(key, {"label": key}).get("label", key)
+
+
+def _score_contributions(hit: Any, state: Any, config: AgentConfig) -> str:
+    """Explain the largest additive ranking signals using the runtime's exact weights."""
+
+    weights = config.weights
+    buying = state.route == "buying"
+    exact_weight = weights.exact_fingerprint * (1.15 if buying else 1.0)
+    coverage_weight = weights.constraint_coverage * (1.20 if buying else 1.0)
+    category_weight = weights.category * (1.0 if buying else 1.15)
+    bm25_weight = weights.bm25 * (1.0 if buying else 0.95)
+    dense_multiplier = config.dense_buying_multiplier if buying else config.dense_browsing_multiplier
+    profile_weight = weights.profile * (0.80 if buying else 1.20)
+    popularity_weight = (
+        weights.popularity * config.buying_popularity_multiplier
+        if buying
+        else weights.popularity
+    )
+    learned_scale = dict(config.learned_reranker_route_scales).get(
+        route_key(state),
+        config.learned_reranker_scale,
+    )
+    contributions = {
+        "exact fingerprints": exact_weight * hit.exact_matches,
+        "constraint coverage": coverage_weight * hit.constraint_score,
+        "category": category_weight * hit.category_score,
+        "BM25": bm25_weight * hit.bm25_score,
+        "dense similarity": weights.dense * dense_multiplier * hit.dense_score,
+        "dense rank": weights.dense_rank * dense_multiplier * hit.dense_rank_score,
+        "dense×constraint": weights.dense_constraint_agreement
+        * hit.dense_score
+        * hit.constraint_score,
+        "dense×category": weights.dense_category_agreement
+        * hit.dense_score
+        * hit.category_score,
+        "profile": profile_weight * hit.profile_score,
+        "popularity": popularity_weight * hit.popularity_score,
+        "learned residual": learned_scale * hit.learned_score,
+        "cross-encoder": weights.cross_encoder * hit.cross_encoder_score,
+        "override recovery": 3.5 * hit.constraint_score
+        if hit.parent_asin in state.override_shortlist
+        else 0.0,
+    }
+    ranked = sorted(
+        ((name, value) for name, value in contributions.items() if abs(value) >= 1e-6),
+        key=lambda item: (-abs(item[1]), item[0]),
+    )[:4]
+    return "; ".join(f"{name} {value:+.3f}" for name, value in ranked) or "deterministic fallback"
 
 
 def decision_signals(turns: list[dict[str, Any]], hit_turn: int | None) -> list[str]:
@@ -341,13 +482,39 @@ class DashboardBackend:
         enable_clarification: bool,
         diversify_browsing: bool,
     ) -> AgentConfig:
+        disabled: list[str] = []
+        if not enable_learned_reranker:
+            disabled.append("reranker")
+        if not enable_clarification:
+            disabled.append("clarification")
+        if not diversify_browsing:
+            disabled.append("diversity")
+        return self._component_config(disabled, enable_dense=enable_dense)
+
+    def _component_config(
+        self,
+        disabled_components: Sequence[str] = (),
+        enable_dense: bool = False,
+    ) -> AgentConfig:
+        """Create the full agent or one controlled ablation from the same defaults."""
+
+        disabled = {str(value) for value in disabled_components}
         return AgentConfig(
             catalog_path=Path(self.catalog_path),
             index_dir=self.catalog.index_dir,
-            enable_learned_reranker=bool(enable_learned_reranker),
-            enable_dense=bool(enable_dense),
-            enable_clarification=bool(enable_clarification),
-            diversify_browsing=bool(diversify_browsing),
+            enable_fts="fts" not in disabled,
+            enable_category="category" not in disabled,
+            enable_fingerprints="fingerprints" not in disabled,
+            enable_state="state" not in disabled,
+            enable_clarification="clarification" not in disabled,
+            enable_profile="profile" not in disabled,
+            enable_popularity="popularity" not in disabled,
+            enable_learned_reranker="reranker" not in disabled,
+            enable_dense=bool(enable_dense) and "dense" not in disabled,
+            diversify_browsing="diversity" not in disabled,
+            recommendation_depth_schedule=(
+                () if "gate" in disabled else AgentConfig().recommendation_depth_schedule
+            ),
             enable_cross_encoder=False,
         )
 
@@ -359,6 +526,22 @@ class DashboardBackend:
         enable_clarification: bool = True,
         diversify_browsing: bool = True,
     ) -> tuple[str, list[dict[str, str]], list[list[Any]], list[list[Any]], dict, dict, dict, str]:
+        """Backward-compatible single replay used by tests and external callers."""
+
+        config = self._config(
+            enable_learned_reranker,
+            enable_dense,
+            enable_clarification,
+            diversify_browsing,
+        )
+        return self._replay_with_config(sample_id, config, "Configured replay")
+
+    def _replay_with_config(
+        self,
+        sample_id: str,
+        config: AgentConfig,
+        variant_label: str,
+    ) -> tuple[str, list[dict[str, str]], list[list[Any]], list[list[Any]], dict, dict, dict, str]:
         if sample_id not in self.samples_by_id:
             raise ValueError(f"Unknown sample id: {sample_id}")
         sample = self.samples_by_id[sample_id]
@@ -366,12 +549,6 @@ class DashboardBackend:
         target_record = self.catalog.products[self.catalog.asin_to_index[target]]
         intent_card, behavior = materialize_hidden_fields(sample, self.raw_products)
         effective = {**sample, "intent_card": intent_card, "behavior": behavior}
-        config = self._config(
-            enable_learned_reranker,
-            enable_dense,
-            enable_clarification,
-            diversify_browsing,
-        )
         agent = Agent(self.catalog_path, config=config, catalog_index=self.catalog)
         session_id = f"dashboard_{sample_id}_{uuid.uuid4().hex}"
         agent.reset(session_id, sample.get("user_profile") or {})
@@ -446,6 +623,9 @@ class DashboardBackend:
                     target_rank,
                     trace["entropy"],
                     trace["information_gain"],
+                    trace["recommendation_depth"],
+                    trace["depth_gate_active"],
+                    trace["depth_gate_reason"],
                     trace["latency_ms"],
                     trace["cache_hit"],
                 ]
@@ -487,6 +667,7 @@ class DashboardBackend:
                     _round(hit.popularity_score),
                     _round(hit.learned_score),
                     _round(hit.cross_encoder_score),
+                    _score_contributions(hit, state, config),
                 ]
                 product_rows.append(row)
                 recommendation_diagnostics.append(dict(zip(PRODUCT_HEADERS[1:], row[1:])))
@@ -532,14 +713,15 @@ class DashboardBackend:
         signals = decision_signals(inference_turns, first_hit_turn)
         status = "HIT" if first_hit_turn is not None else "MISS"
         summary = (
-            f"## {status}: {sample_id}\n\n"
-            f"| Expected #1 product | Outcome | Scenario | Turns used | Dense | Learned reranker |\n"
-            f"|---|---:|---|---:|---:|---:|\n"
+            f"## {variant_label} · {status}: {sample_id}\n\n"
+            f"| Expected #1 product | Outcome | Scenario | Turns used | Dense | Learned reranker | Depth gate |\n"
+            f"|---|---:|---|---:|---:|---:|---:|\n"
             f"| **{target_record.title}** (`{target}`) | "
             f"{'rank ' + str(first_hit_rank) + ' on turn ' + str(first_hit_turn) if first_hit_turn else 'not found'} | "
             f"{sample['scenario_type']} | {len(inference_turns)} | "
             f"{agent.engine.retriever.semantic.enabled} | "
-            f"{agent.engine.retriever.learned_reranker.enabled} |\n\n"
+            f"{agent.engine.retriever.learned_reranker.enabled} | "
+            f"{bool(config.recommendation_depth_schedule)} |\n\n"
             "> This is a development replay. The expected product and hidden intent are shown for diagnosis; "
             "they are never sent to `Agent.respond`."
         )
@@ -570,13 +752,27 @@ class DashboardBackend:
                 "reciprocal_rank": 0.0 if first_hit_rank is None else 1.0 / first_hit_rank,
             },
             "runtime": {
-                "dense_requested": enable_dense,
+                "variant": variant_label,
+                "dense_requested": config.enable_dense,
                 "dense_loaded": agent.engine.retriever.semantic.enabled,
                 "dense_failure_reason": agent.engine.retriever.semantic.failure_reason,
-                "learned_reranker_requested": enable_learned_reranker,
+                "learned_reranker_requested": config.enable_learned_reranker,
                 "learned_reranker_loaded": agent.engine.retriever.learned_reranker.enabled,
                 "learned_reranker_failure_reason": agent.engine.retriever.learned_reranker.failure_reason,
                 "cross_encoder_loaded": agent.engine.retriever.cross_encoder.enabled,
+                "component_configuration": {
+                    "fts": config.enable_fts,
+                    "category": config.enable_category,
+                    "fingerprints": config.enable_fingerprints,
+                    "state": config.enable_state,
+                    "clarification": config.enable_clarification,
+                    "profile": config.enable_profile,
+                    "popularity": config.enable_popularity,
+                    "reranker": config.enable_learned_reranker,
+                    "gate": bool(config.recommendation_depth_schedule),
+                    "diversity": config.diversify_browsing,
+                    "dense": config.enable_dense,
+                },
             },
             "decision_signals": signals,
             "turns": inference_turns,
@@ -595,26 +791,147 @@ class DashboardBackend:
             decision_markdown,
         )
 
-    def compare_reranker(
+    def compare_session_components(
+        self,
+        sample_id: str,
+        disabled_components: Sequence[str] = DEFAULT_SESSION_ABLATIONS,
+        enable_dense: bool = False,
+    ) -> tuple[
+        str,
+        list[list[Any]],
+        list[list[Any]],
+        str,
+        str,
+        list[dict[str, str]],
+        list[dict[str, str]],
+        list[list[Any]],
+        list[list[Any]],
+        list[list[Any]],
+        list[list[Any]],
+        dict,
+        dict,
+        dict,
+        dict,
+        str,
+    ]:
+        """Replay one session with the full agent and one controlled ablation."""
+
+        selected = [
+            str(value)
+            for value in disabled_components
+            if str(value) in COMPONENT_SPECS
+        ]
+        full_dense = bool(enable_dense) or "dense" in selected
+        full = self._replay_with_config(
+            sample_id,
+            self._component_config((), enable_dense=full_dense),
+            "Full agent",
+        )
+        ablated = self._replay_with_config(
+            sample_id,
+            self._component_config(selected, enable_dense=full_dense),
+            "Without selected components",
+        )
+        full_inference = full[6]
+        ablated_inference = ablated[6]
+        full_result = dict(full_inference["result"])
+        ablated_result = dict(ablated_inference["result"])
+        full_session = {
+            **full_result,
+            "reciprocal_rank": full_result["reciprocal_rank"],
+        }
+        ablated_session = {
+            **ablated_result,
+            "reciprocal_rank": ablated_result["reciprocal_rank"],
+        }
+        full_value = _session_contribution(full_session)
+        ablated_value = _session_contribution(ablated_session)
+        full_turn = full_result["first_hit_turn"] or 11
+        ablated_turn = ablated_result["first_hit_turn"] or 11
+        outcome_rows = [
+            ["Hit", int(bool(full_result["hit"])), int(bool(ablated_result["hit"])), int(bool(full_result["hit"])) - int(bool(ablated_result["hit"]))],
+            ["First hit turn", full_result["first_hit_turn"], ablated_result["first_hit_turn"], ablated_turn - full_turn],
+            ["Best rank", full_result["best_rank"], ablated_result["best_rank"], None if not full_result["best_rank"] or not ablated_result["best_rank"] else ablated_result["best_rank"] - full_result["best_rank"]],
+            ["Reciprocal rank", _round(full_result["reciprocal_rank"]), _round(ablated_result["reciprocal_rank"]), _round(float(full_result["reciprocal_rank"]) - float(ablated_result["reciprocal_rank"]))],
+            ["TechnicalScore contribution", _round(full_value), _round(ablated_value), _round(full_value - ablated_value)],
+        ]
+        full_components = dict(full_inference["runtime"]["component_configuration"])
+        ablated_components = dict(ablated_inference["runtime"]["component_configuration"])
+        status_rows: list[list[Any]] = []
+        for key, spec in COMPONENT_SPECS.items():
+            full_status: Any = full_components.get(key, False)
+            ablated_status: Any = ablated_components.get(key, False)
+            if key == "reranker":
+                full_status = f"configured={full_status}, loaded={full_inference['runtime']['learned_reranker_loaded']}"
+                ablated_status = f"configured={ablated_status}, loaded={ablated_inference['runtime']['learned_reranker_loaded']}"
+            elif key == "dense":
+                full_status = f"requested={full_status}, loaded={full_inference['runtime']['dense_loaded']}"
+                ablated_status = f"requested={ablated_status}, loaded={ablated_inference['runtime']['dense_loaded']}"
+            status_rows.append([spec["label"], full_status, ablated_status, spec["evidence"]])
+
+        labels = ", ".join(_component_label(key) for key in selected) or "nothing"
+        delta = full_value - ablated_value
+        verdict = "helped" if delta > 1e-9 else "hurt" if delta < -1e-9 else "tied"
+        summary = (
+            f"## Paired session ablation · `{sample_id}`\n\n"
+            f"Removed in the second replay: **{labels}**. The full agent **{verdict}** this session by "
+            f"`{delta:+.6f}` TechnicalScore contribution (`{full_value:.6f}` vs `{ablated_value:.6f}`).\n\n"
+            "> Both variants receive the same evaluator policy and target, but their questions can create different "
+            "later customer messages. Treat this as an end-to-end causal replay, and use the turn tables to explain the path."
+        )
+        signals = (
+            "## Report / video interpretation\n\n"
+            f"- Selected components: **{labels}**.\n"
+            f"- Full-agent outcome: turn `{full_result['first_hit_turn']}`, rank `{full_result['best_rank']}`.\n"
+            f"- Ablated outcome: turn `{ablated_result['first_hit_turn']}`, rank `{ablated_result['best_rank']}`.\n"
+            f"- Paired contribution delta: **`{delta:+.6f}`**. Positive means the selected components add value on this session.\n"
+            "- Use the score-contribution column to explain why products moved; use gate columns to explain why recommendation depth changed."
+        )
+        return (
+            summary,
+            outcome_rows,
+            status_rows,
+            full[0],
+            ablated[0],
+            full[1],
+            ablated[1],
+            full[2],
+            ablated[2],
+            full[3],
+            ablated[3],
+            full[4],
+            full[5],
+            full_inference,
+            ablated_inference,
+            signals,
+        )
+
+    def compare_components(
         self,
         sample_count: int = 40,
+        components: Sequence[str] = DEFAULT_SESSION_ABLATIONS,
         enable_dense: bool = False,
-        enable_clarification: bool = True,
-    ) -> tuple[str, list[list[Any]], list[list[Any]]]:
+    ) -> tuple[str, list[list[Any]], list[list[Any]], dict[str, Any]]:
+        """Measure the marginal end-to-end value of each selected component."""
+
         count = max(1, min(len(self.samples), int(sample_count)))
         samples = self.samples[:count]
-        configurations = {
-            "Deterministic baseline": self._config(
-                False, enable_dense, enable_clarification, True
-            ),
-            "Frozen learned reranker": self._config(
-                True, enable_dense, enable_clarification, True
-            ),
+        selected = [str(value) for value in components if str(value) in COMPONENT_SPECS]
+        if not selected:
+            selected = list(DEFAULT_SESSION_ABLATIONS)
+        full_dense = bool(enable_dense) or "dense" in selected
+        configurations: dict[str, tuple[str | None, AgentConfig]] = {
+            "Full agent": (None, self._component_config((), enable_dense=full_dense))
         }
+        for component in selected:
+            configurations[f"Without {_component_label(component)}"] = (
+                component,
+                self._component_config((component,), enable_dense=full_dense),
+            )
+
         metrics: dict[str, dict[str, Any]] = {}
-        diagnostic_map: dict[str, dict[str, Any]] = {}
-        comparison_rows: list[list[Any]] = []
-        for name, config in configurations.items():
+        diagnostics: dict[str, dict[str, Any]] = {}
+        for name, (removed, config) in configurations.items():
             agent = Agent(self.catalog_path, config=config, catalog_index=self.catalog)
             result = evaluate(
                 agent,
@@ -628,21 +945,42 @@ class DashboardBackend:
                 for events in agent.engine.traces.values()
                 for event in events
             ]
-            diagnostics = {
+            metrics[name] = result
+            diagnostics[name] = {
+                "removed": removed,
                 "mean_latency": statistics.fmean(latencies) if latencies else 0.0,
                 "p95_latency": _percentile(latencies, 0.95),
                 "dense": agent.engine.retriever.semantic.enabled,
                 "reranker": agent.engine.retriever.learned_reranker.enabled,
+                "gate": bool(config.recommendation_depth_schedule),
             }
-            metrics[name] = result
-            diagnostic_map[name] = diagnostics
-            scopes = {"Overall": {key: result[key] for key in ("sample_count", "hit_rate_at_10", "mrr", "mttc")}}
-            scopes.update(result["scenario_metrics"])
+
+        full_metric = metrics["Full agent"]
+        full_scopes: dict[str, dict[str, Any]] = {
+            "Overall": {
+                key: full_metric[key]
+                for key in ("sample_count", "hit_rate_at_10", "mrr", "mttc")
+            },
+            **dict(full_metric["scenario_metrics"]),
+        }
+        comparison_rows: list[list[Any]] = []
+        for name, result in metrics.items():
+            removed = diagnostics[name]["removed"]
+            scopes: dict[str, dict[str, Any]] = {
+                "Overall": {
+                    key: result[key]
+                    for key in ("sample_count", "hit_rate_at_10", "mrr", "mttc")
+                },
+                **dict(result["scenario_metrics"]),
+            }
             for scope, summary in scopes.items():
                 efficiency, score = _technical_score(summary)
+                full_summary = full_scopes[scope]
+                _, full_score = _technical_score(full_summary)
                 comparison_rows.append(
                     [
                         name,
+                        _component_label(removed) if removed else "—",
                         scope,
                         summary["sample_count"],
                         summary["hit_rate_at_10"],
@@ -650,52 +988,145 @@ class DashboardBackend:
                         summary["mttc"],
                         _round(efficiency),
                         _round(score),
-                        _round(diagnostics["mean_latency"], 3),
-                        _round(diagnostics["p95_latency"], 3),
-                        diagnostics["dense"],
-                        diagnostics["reranker"],
+                        _round(score - full_score),
+                        _round(float(summary["mrr"]) - float(full_summary["mrr"])),
+                        _round(float(summary["mttc"]) - float(full_summary["mttc"])),
+                        _round(diagnostics[name]["mean_latency"], 3),
+                        _round(diagnostics[name]["p95_latency"], 3),
+                        diagnostics[name]["dense"],
+                        diagnostics[name]["reranker"],
+                        diagnostics[name]["gate"],
                     ]
                 )
-        baseline_sessions = {
+
+        full_sessions = {
             str(item["sample_id"]): item
-            for item in metrics["Deterministic baseline"]["sessions"]
-        }
-        reranked_sessions = {
-            str(item["sample_id"]): item
-            for item in metrics["Frozen learned reranker"]["sessions"]
+            for item in full_metric["sessions"]
         }
         session_rows: list[list[Any]] = []
-        for sample in samples:
-            sample_id = str(sample["sample_id"])
-            baseline = baseline_sessions[sample_id]
-            reranked = reranked_sessions[sample_id]
-            baseline_turn = baseline["first_hit_turn"] or 11
-            reranked_turn = reranked["first_hit_turn"] or 11
-            session_rows.append(
-                [
-                    sample_id,
-                    sample["scenario_type"],
-                    baseline["first_hit_turn"],
-                    baseline["best_rank"],
-                    reranked["first_hit_turn"],
-                    reranked["best_rank"],
-                    baseline_turn - reranked_turn,
-                    _round(reranked["reciprocal_rank"] - baseline["reciprocal_rank"]),
-                ]
+        for name, result in metrics.items():
+            removed = diagnostics[name]["removed"]
+            if removed is None:
+                continue
+            ablated_sessions = {
+                str(item["sample_id"]): item
+                for item in result["sessions"]
+            }
+            for sample in samples:
+                sample_id = str(sample["sample_id"])
+                full_session = full_sessions[sample_id]
+                ablated_session = ablated_sessions[sample_id]
+                full_turn = full_session["first_hit_turn"] or 11
+                ablated_turn = ablated_session["first_hit_turn"] or 11
+                session_rows.append(
+                    [
+                        _component_label(removed),
+                        sample_id,
+                        sample["scenario_type"],
+                        full_session["first_hit_turn"],
+                        full_session["best_rank"],
+                        ablated_session["first_hit_turn"],
+                        ablated_session["best_rank"],
+                        _round(
+                            _session_contribution(full_session)
+                            - _session_contribution(ablated_session)
+                        ),
+                        ablated_turn - full_turn,
+                        _round(
+                            float(full_session["reciprocal_rank"])
+                            - float(ablated_session["reciprocal_rank"])
+                        ),
+                    ]
+                )
+
+        full_score = float(full_metric["recommended_technical_score"])
+        values = []
+        for name, result in metrics.items():
+            removed = diagnostics[name]["removed"]
+            if removed is None:
+                continue
+            values.append(
+                (
+                    removed,
+                    full_score - float(result["recommended_technical_score"]),
+                )
             )
-        baseline_score = float(metrics["Deterministic baseline"]["recommended_technical_score"])
-        reranked_score = float(metrics["Frozen learned reranker"]["recommended_technical_score"])
-        gain = reranked_score - baseline_score
-        verdict = "improves" if gain > 0 else "does not improve"
-        summary = (
-            f"## Batch comparison: first {count} public development sessions\n\n"
-            f"The frozen reranker **{verdict}** TechnicalScore on this slice: "
-            f"`{baseline_score:.6f}` → `{reranked_score:.6f}` "
-            f"(`{gain:+.6f}`).\n\n"
-            "> This is development-set analysis, not a private-test estimate. Use the per-session table to identify "
-            "whether gains come from earlier turns, better rank, or memorized public-set regularities."
+        values.sort(key=lambda item: (-item[1], item[0]))
+        ranking = "\n".join(
+            f"- **{_component_label(component)}:** `{value:+.6f}` full-minus-ablated TechnicalScore"
+            for component, value in values
         )
-        return summary, comparison_rows, session_rows
+        summary = (
+            f"## Component value lab · first {count} sessions in {self.scope_name}\n\n"
+            f"Full-agent TechnicalScore: **`{full_score:.6f}`**. Each row below removes exactly one "
+            "component from that same full configuration. Positive full-minus-ablated value means the component helps.\n\n"
+            f"{ranking}\n\n"
+            "> End-to-end ablations can change the next simulated customer message by changing `ask_attribute`. "
+            "Use development-only scopes for model selection; held-out scopes are descriptive readouts."
+        )
+        performance_path = Path(__file__).resolve().parents[1] / "docs" / "performance_results.json"
+        frozen_performance: dict[str, Any] = {}
+        if performance_path.exists():
+            try:
+                frozen_performance = json.loads(performance_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                frozen_performance = {"status": "performance artifact could not be read"}
+        evidence = {
+            "scope": self.scope_name,
+            "sample_count": count,
+            "full_agent": {
+                key: full_metric[key]
+                for key in (
+                    "hit_rate_at_10",
+                    "mrr",
+                    "mttc",
+                    "efficiency",
+                    "recommended_technical_score",
+                    "reported_token_usage",
+                    "scenario_metrics",
+                )
+            },
+            "component_value": {
+                component: _round(value)
+                for component, value in values
+            },
+            "operational_disclosure": {
+                "external_api_calls": 0,
+                "paid_model_cost_usd": 0,
+                "network_required_at_inference": False,
+                "llm_prompt_tokens": 0,
+                "llm_completion_tokens": 0,
+                "active_ranker": "dependency-free linear residual ranker",
+                "optional_dense_model": "BAAI/bge-small-en-v1.5; only loaded when requested and verified",
+            },
+            "frozen_performance_evidence": frozen_performance,
+            "limitations": [
+                "Public labels and hidden intent are exposed only in this development dashboard.",
+                "End-to-end dialogue paths may differ after an ablation changes the selected question.",
+                "English clothing-specific extraction is not yet a domain-general ontology.",
+                "The private organizer evaluation remains the decisive test.",
+            ],
+            "team_contributions": {
+                "status": "TODO before submission",
+                "required_action": "Replace the README placeholder with member names and specific contributions.",
+            },
+        }
+        return summary, comparison_rows, session_rows, evidence
+
+    def compare_reranker(
+        self,
+        sample_count: int = 40,
+        enable_dense: bool = False,
+        enable_clarification: bool = True,
+    ) -> tuple[str, list[list[Any]], list[list[Any]]]:
+        """Compatibility wrapper for the original reranker-only dashboard API."""
+
+        summary, comparison, sessions, _ = self.compare_components(
+            sample_count,
+            ("reranker",),
+            enable_dense,
+        )
+        return summary, comparison, sessions
 
     @staticmethod
     def _live_scenario_rows(overall: dict[str, Any]) -> list[list[Any]]:
@@ -773,12 +1204,15 @@ class DashboardBackend:
                 if kind == "start":
                     metadata = dict(event["metadata"])
                     dirty = metadata.get("git", {}).get("working_tree_changes") or []
-                    yield (
+                    initialized = (
                         "## Fresh 200-session evaluation initialized\n\n"
                         f"Source digest: `{metadata['source']['combined_sha256'][:16]}…`  \n"
                         f"Git commit: `{metadata.get('git', {}).get('commit') or 'unavailable'}`  \n"
                         f"Working-tree changes: `{len(dirty)}`  \n\n"
-                        "The child process imported the current files from disk after you pressed Start.",
+                        "The child process imported the current files from disk after you pressed Start."
+                    )
+                    yield (
+                        initialized,
                         {},
                         [],
                         session_rows,
@@ -898,51 +1332,108 @@ def build_dashboard(backend: DashboardBackend):
                     label="Session",
                     scale=4,
                 )
-                learned = gr.Checkbox(
+                session_dense = gr.Checkbox(
                     value=False,
-                    label="Enable frozen learned reranker",
-                    info="Off by default so the rule-based algorithm is easy to inspect.",
+                    label="Include optional BGE in full agent",
+                    info="Selecting the BGE ablation also requests it automatically; assets still fail closed.",
                 )
-                dense = gr.Checkbox(
-                    value=False,
-                    label="Request BGE dense route",
-                    info="Fails closed when verified embeddings are absent.",
-                )
-                clarification = gr.Checkbox(value=True, label="Enable clarification")
-                diversify = gr.Checkbox(value=True, label="Diversify Browsing ranks 4–10")
-            run = gr.Button("Replay exact evaluator session", variant="primary")
-            summary = gr.Markdown()
+            session_components = gr.CheckboxGroup(
+                choices=COMPONENT_CHOICES,
+                value=DEFAULT_SESSION_ABLATIONS,
+                label="Remove these components in the comparison replay",
+                info=(
+                    "The first replay always uses the full current agent. Select one component for a clean "
+                    "individual ablation, or several to inspect an interaction."
+                ),
+            )
+            run = gr.Button("Replay full agent vs selected ablation", variant="primary")
+            ablation_summary = gr.Markdown()
             with gr.Row():
-                with gr.Column(scale=2):
-                    conversation = gr.Chatbot(
-                        label="Entire evaluator ↔ agent conversation",
+                outcome_comparison = gr.Dataframe(
+                    headers=SESSION_OUTCOME_HEADERS,
+                    interactive=False,
+                    label="Paired session outcome",
+                )
+                component_status = gr.Dataframe(
+                    headers=COMPONENT_STATUS_HEADERS,
+                    interactive=False,
+                    label="What is on and off in each replay",
+                )
+            with gr.Row():
+                target = gr.JSON(label="Expected #1 product and evaluator intent")
+                profile = gr.JSON(label="User profile supplied to Agent.reset")
+            with gr.Row(equal_height=True):
+                with gr.Column():
+                    full_summary = gr.Markdown()
+                    full_conversation = gr.Chatbot(
+                        label="Full agent · evaluator ↔ agent conversation",
                         height=620,
                         type="messages",
                         allow_tags=False,
                     )
-                with gr.Column(scale=1):
-                    target = gr.JSON(label="Expected #1 product and evaluator intent")
-                    profile = gr.JSON(label="User profile supplied to Agent.reset")
-            decisions = gr.Markdown()
-            with gr.Tab("Turn-by-turn state"):
-                turns = gr.Dataframe(
-                    headers=TURN_HEADERS,
-                    interactive=False,
-                    label="Evaluator input, agent output, parsed state, uncertainty, and target position",
+                with gr.Column():
+                    ablated_summary = gr.Markdown()
+                    ablated_conversation = gr.Chatbot(
+                        label="Without selected components · evaluator ↔ agent conversation",
+                        height=620,
+                        type="messages",
+                        allow_tags=False,
+                    )
+            replay_interpretation = gr.Markdown()
+            with gr.Tab("Full vs ablated turn state"):
+                with gr.Row():
+                    full_turns = gr.Dataframe(
+                        headers=TURN_HEADERS,
+                        interactive=False,
+                        label="Full agent: state, uncertainty, gate, and target position",
+                    )
+                    ablated_turns = gr.Dataframe(
+                        headers=TURN_HEADERS,
+                        interactive=False,
+                        label="Ablated agent: state, uncertainty, gate, and target position",
+                    )
+            with gr.Tab("Full vs ablated ranked products"):
+                gr.Markdown(
+                    "The final column decomposes the largest additive score signals for a transparent recommendation explanation."
                 )
-            with gr.Tab("Recommended products and ranking signals"):
-                recommendations = gr.Dataframe(
-                    headers=PRODUCT_HEADERS,
-                    interactive=False,
-                    label="Every recommendation on every turn with product metadata and score features",
-                    elem_classes="diagnostic-table",
-                )
-            with gr.Tab("Complete inference JSON"):
-                inference = gr.JSON(label="All captured non-response diagnostics")
+                with gr.Row():
+                    full_recommendations = gr.Dataframe(
+                        headers=PRODUCT_HEADERS,
+                        interactive=False,
+                        label="Full agent recommendations",
+                        elem_classes="diagnostic-table",
+                    )
+                    ablated_recommendations = gr.Dataframe(
+                        headers=PRODUCT_HEADERS,
+                        interactive=False,
+                        label="Ablated recommendations",
+                        elem_classes="diagnostic-table",
+                    )
+            with gr.Tab("Complete paired inference JSON"):
+                with gr.Row():
+                    full_inference = gr.JSON(label="Full-agent diagnostics")
+                    ablated_inference = gr.JSON(label="Ablated diagnostics")
             run.click(
-                fn=backend.replay,
-                inputs=[session, learned, dense, clarification, diversify],
-                outputs=[summary, conversation, turns, recommendations, target, profile, inference, decisions],
+                fn=backend.compare_session_components,
+                inputs=[session, session_components, session_dense],
+                outputs=[
+                    ablation_summary,
+                    outcome_comparison,
+                    component_status,
+                    full_summary,
+                    ablated_summary,
+                    full_conversation,
+                    ablated_conversation,
+                    full_turns,
+                    ablated_turns,
+                    full_recommendations,
+                    ablated_recommendations,
+                    target,
+                    profile,
+                    full_inference,
+                    ablated_inference,
+                    replay_interpretation,
+                ],
                 concurrency_limit=1,
             )
         with gr.Tab("All expected products"):
@@ -955,32 +1446,70 @@ def build_dashboard(backend: DashboardBackend):
                 interactive=False,
                 label="Sessions and expected number-one products",
             )
-        with gr.Tab("Reranker A/B"):
+        with gr.Tab("Component value lab"):
             gr.Markdown(
-                "Compare the rule-based deterministic ranker with the frozen public-development-trained residual "
-                "reranker under the same unchanged evaluator. Larger slices take longer on CPU."
+                "Run the full agent once, then remove each selected component individually under the unchanged "
+                "evaluator. This produces the overall, scenario, latency, and per-session evidence needed for the report."
             )
             with gr.Row():
                 batch_count = gr.Slider(1, len(backend.samples), value=40, step=1, label="Session count")
-                batch_dense = gr.Checkbox(value=False, label="Request BGE dense route")
-                batch_clarification = gr.Checkbox(value=True, label="Enable clarification")
-            compare = gr.Button("Run baseline vs reranker", variant="primary")
+                batch_dense = gr.Checkbox(
+                    value=False,
+                    label="Include optional BGE in full agent",
+                    info="Selecting the BGE ablation requests it automatically.",
+                )
+            batch_components = gr.CheckboxGroup(
+                choices=COMPONENT_CHOICES,
+                value=DEFAULT_SESSION_ABLATIONS,
+                label="Components to ablate one at a time",
+            )
+            compare = gr.Button("Measure selected component values", variant="primary")
             comparison_summary = gr.Markdown()
             comparison = gr.Dataframe(
                 headers=COMPARISON_HEADERS,
                 interactive=False,
-                label="Overall and per-scenario metrics",
+                label="Full-agent and per-component overall/scenario metrics",
             )
             session_comparison = gr.Dataframe(
                 headers=SESSION_COMPARISON_HEADERS,
                 interactive=False,
-                label="Per-session turn and rank changes",
+                label="Per-session component effects",
+            )
+            report_evidence = gr.JSON(
+                label="Report-ready architecture, metric, cost, token, and limitation evidence"
             )
             compare.click(
-                fn=backend.compare_reranker,
-                inputs=[batch_count, batch_dense, batch_clarification],
-                outputs=[comparison_summary, comparison, session_comparison],
+                fn=backend.compare_components,
+                inputs=[batch_count, batch_components, batch_dense],
+                outputs=[comparison_summary, comparison, session_comparison, report_evidence],
                 concurrency_limit=1,
+            )
+        with gr.Tab("Report & video evidence"):
+            gr.Markdown(
+                """
+## Deliverable map
+
+| Deliverable evidence | Where to capture it |
+|---|---|
+| Architecture and active components | Component status table plus complete paired inference JSON |
+| Multi-turn demonstration | Side-by-side session conversations and turn-state tables |
+| Reranker and precision-gate value | Select each separately in Session replay; confirm across scenarios in Component value lab |
+| Transparent recommendation explanations | Dominant score contributions in the ranked-products tab |
+| Models, cost, tokens, network fallback | Report-ready JSON in Component value lab |
+| Overall and per-scenario metrics | Component value lab and Live latest-code test |
+| Latency | Replay turn table, component metric table, and live artifact |
+| Limitations | Report-ready JSON and the project documentation |
+| Team contributions | Complete the named contribution section in the final report before submission |
+
+### Recommended video sequence
+
+1. Show the full-agent component status and the target without revealing it to `Agent.respond`.
+2. Replay an Intent Override session and point out route, epoch, retained state, information gain, gate depth, and target rank.
+3. Toggle off the precision gate and reranker separately; show the paired contribution delta and why the product order changed.
+4. Show overall and per-scenario component value, then the zero-token, zero-API-cost operational disclosure.
+
+The dashboard is diagnostic evidence, not the official response surface. Expected products and evaluator intent remain isolated from agent inference.
+"""
             )
         with gr.Tab("Live latest-code test"):
             gr.Markdown(

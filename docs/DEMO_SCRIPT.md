@@ -12,13 +12,12 @@ Show the README architecture diagram. Explain the two routes, participant-visibl
 
 ## 3. Live multi-turn trace — 60 seconds
 
-Run `python -m cartographer.demo --sample-id public_0002` and call out the route, candidate count, entropy, selected clarification attribute, information gain, Top 10, intent-epoch change after “Actually, ignore…”, stale-constraint removal, and final target rank.
+Open the dashboard's **Session replay** and select an Intent Override session. Compare the full agent with only the precision gate removed. Call out the route, candidate count, entropy, selected clarification attribute, information gain, returned depth, gate reason, intent-epoch change after “Actually, ignore…”, retention of unrelated disclosed constraints, and final target rank. Then rerun with only the learned reranker removed and use the dominant-score-contribution column to explain the rank movement.
 
 ## 4. Results and ablations — 30 seconds
 
-Show `docs/RESULTS.md`. Compare the frozen Cartographer score with the published starter and show component ablations. Include p95 latency, memory, token usage, and scenario metrics.
+Show the dashboard's **Component value lab**. Compare the full agent with the published starter and show reranker, gate, fingerprints, state, and clarification ablations. Include overall and scenario TechnicalScore, p95 latency, memory from the frozen benchmark, zero token usage, zero API cost, and offline fallback. Finish on the **Report & video evidence** checklist.
 
 ## 5. Impact — 20 seconds
 
 Close with the generalization story: the same active-search loop can power jobs, travel, real estate, procurement, and knowledge discovery. A good copilot does not merely answer—it decides what is most valuable to learn next.
-

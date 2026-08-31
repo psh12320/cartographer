@@ -102,8 +102,53 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual([canonical(item.value) for item in state.active_constraints], ["wool"])
         self.assertEqual(state.override_shortlist, {"A"})
         self.assertEqual(state.seen_products, set())
+        self.assertIn("color", state.declined_attributes)
         self.assertNotIn("cotton", canonical(state.active_query_text))
         self.assertIn("wool", canonical(state.active_query_text))
+
+    def test_override_replaces_initial_preference_and_retains_later_constraints(self) -> None:
+        manager = DialogManager()
+        state = SessionState("session", {})
+        manager.update(state, "I'm looking for shirts. cotton", 1)
+        initial_preference = state.replaceable_constraint
+        self.assertIsNotNone(initial_preference)
+        self.assertEqual(canonical(initial_preference.value), "cotton")
+        manager.update(
+            state,
+            "For that, what matters is: color: blue; budget around $50.",
+            2,
+        )
+        state.asked_attributes.update({"color", "budget"})
+
+        manager.update(
+            state,
+            "Actually, ignore my earlier preference. What I need is: wool.",
+            3,
+        )
+
+        active = {canonical(item.value) for item in state.active_constraints}
+        self.assertNotIn("cotton", active)
+        self.assertFalse(initial_preference.active)
+        self.assertIn("color blue", active)
+        self.assertIn("budget around 50", active)
+        self.assertIn("wool", active)
+        self.assertIsNotNone(state.replaceable_constraint)
+        self.assertEqual(canonical(state.replaceable_constraint.value), "wool")
+        self.assertEqual(state.replaceable_constraint.strength, "hard")
+        self.assertEqual(state.category, "shirts")
+        self.assertEqual(state.asked_attributes, {"color", "budget"})
+
+        manager.update(
+            state,
+            "Actually, linen instead.",
+            4,
+        )
+        active = {canonical(item.value) for item in state.active_constraints}
+        self.assertNotIn("wool", active)
+        self.assertIn("linen", active)
+        self.assertIn("color blue", active)
+        self.assertIn("budget around 50", active)
+        self.assertEqual(state.replaceable_constraint.strength, "hard")
 
     def test_full_active_query_accumulates_and_resets_by_epoch(self) -> None:
         manager = DialogManager()
@@ -140,6 +185,7 @@ class CartographerTest(unittest.TestCase):
             [canonical(item.value) for item in state.active_constraints],
             ["waterproof boots"],
         )
+        self.assertIn("color", state.declined_attributes)
 
     def test_entropy_policy_prefers_discriminating_feature(self) -> None:
         catalog = CatalogIndex(self.catalog_path, self.root / "index")
@@ -178,6 +224,10 @@ class CartographerTest(unittest.TestCase):
         engine.reset("depth", {"preference_tags": []})
         first = engine.respond("depth", "I'm looking for Men Shirts.", 1, 10)
         self.assertEqual(len(first["recommendations"]), 1)
+        first_trace = engine.get_trace("depth")[-1]
+        self.assertTrue(first_trace["depth_gate_active"])
+        self.assertEqual(first_trace["recommendation_depth"], 1)
+        self.assertEqual(first_trace["depth_gate_reason"], "informative question")
         second = engine.respond("depth", "I like a breathable layer.", 2, 10)
         self.assertEqual(len(second["recommendations"]), 2)
         third = engine.respond("depth", "Still browsing.", 3, 10)
@@ -194,6 +244,9 @@ class CartographerTest(unittest.TestCase):
         engine.reset("gate", {"preference_tags": []})
         response = engine.respond("gate", "I'm looking for Men Shirts.", 1, 10)
         self.assertEqual(len({item["parent_asin"] for item in response["recommendations"]}), 5)
+        trace = engine.get_trace("gate")[-1]
+        self.assertFalse(trace["depth_gate_active"])
+        self.assertEqual(trace["depth_gate_reason"], "no sufficiently informative question")
 
     def test_empty_depth_schedule_returns_full_lists(self) -> None:
         config = self.config.with_overrides(recommendation_depth_schedule=())
@@ -201,6 +254,21 @@ class CartographerTest(unittest.TestCase):
         engine.reset("full", {"preference_tags": []})
         response = engine.respond("full", "I'm looking for Men Shirts.", 1, 10)
         self.assertEqual(len({item["parent_asin"] for item in response["recommendations"]}), 5)
+        self.assertEqual(engine.get_trace("full")[-1]["depth_gate_reason"], "disabled")
+
+    def test_profile_and_popularity_can_be_ablated_without_changing_defaults(self) -> None:
+        config = self.config.with_overrides(enable_profile=False, enable_popularity=False)
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("ablated", {"preference_tags": ["material"], "summary": "material"})
+        engine.respond("ablated", "I'm looking for Men Shirts.", 1, 10)
+        self.assertEqual(engine.sessions["ablated"].user_profile, {})
+        self.assertTrue(engine.sessions["ablated"].cached_hits)
+        self.assertTrue(
+            all(hit.profile_score == 0.0 for hit in engine.sessions["ablated"].cached_hits)
+        )
+        self.assertTrue(
+            all(hit.popularity_score == 0.0 for hit in engine.sessions["ablated"].cached_hits)
+        )
 
     def test_boundary_and_empty_message_have_valid_fallbacks(self) -> None:
         engine = CartographerEngine(self.catalog_path, self.config)
@@ -466,7 +534,33 @@ class CartographerTest(unittest.TestCase):
         self.assertTrue(products)
         self.assertEqual(inference["target"], "A")
         self.assertIn("turns", inference)
+        self.assertIn("recommendation_depth", inference["turns"][0])
+        self.assertIsInstance(products[0][-1], str)
+        self.assertTrue(products[0][-1])
         self.assertIn("What this replay suggests", decisions)
+
+        paired = backend.compare_session_components(
+            "public_test",
+            ("reranker", "gate"),
+            enable_dense=False,
+        )
+        self.assertEqual(len(paired), 16)
+        self.assertIn("Paired session ablation", paired[0])
+        self.assertTrue(paired[1])
+        self.assertTrue(paired[2])
+        self.assertTrue(paired[13]["runtime"]["component_configuration"]["gate"])
+        self.assertFalse(paired[14]["runtime"]["component_configuration"]["gate"])
+
+        batch_summary, comparison, session_comparison, evidence = backend.compare_components(
+            1,
+            ("reranker", "gate"),
+            enable_dense=False,
+        )
+        self.assertIn("Component value lab", batch_summary)
+        self.assertTrue(comparison)
+        self.assertTrue(session_comparison)
+        self.assertEqual(evidence["sample_count"], 1)
+        self.assertEqual(set(evidence["component_value"]), {"reranker", "gate"})
 
     def test_dashboard_decision_signals_distinguish_retrieval_and_ranking(self) -> None:
         retrieval = decision_signals(
@@ -538,6 +632,26 @@ class CartographerTest(unittest.TestCase):
             Counter(sample["scenario_type"] for sample in development),
             Counter({"buying": 2, "browsing": 2, "intent_override": 2, "boundary": 2}),
         )
+
+    def test_public_split_accepts_only_line_ending_normalization(self) -> None:
+        dataset = self.root / "split-newlines.jsonl"
+        lf_content = (
+            b'{"sample_id":"one","scenario_type":"buying"}\n'
+            b'{"sample_id":"two","scenario_type":"buying"}\n'
+        )
+        dataset.write_bytes(lf_content)
+        samples = [
+            {"sample_id": "one", "scenario_type": "buying"},
+            {"sample_id": "two", "scenario_type": "buying"},
+        ]
+        manifest = build_manifest(samples, dataset, seed="newline-test")
+
+        dataset.write_bytes(lf_content.replace(b"\n", b"\r\n"))
+        validate_manifest(samples, manifest, dataset)
+
+        dataset.write_bytes(lf_content.replace(b'"two"', b'"changed"').replace(b"\n", b"\r\n"))
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            validate_manifest(samples, manifest, dataset)
 
     def test_frozen_ranker_uses_only_locked_development_partition(self) -> None:
         repository = Path(__file__).resolve().parents[1]

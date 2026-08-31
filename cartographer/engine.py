@@ -41,7 +41,8 @@ class CartographerEngine:
             raise ValueError("session_id must be a non-empty string")
         if session_id in self.sessions:
             self._session_order.remove(session_id)
-        self.sessions[session_id] = SessionState(session_id=session_id, user_profile=dict(user_profile or {}))
+        profile = dict(user_profile or {}) if self.config.enable_profile else {}
+        self.sessions[session_id] = SessionState(session_id=session_id, user_profile=profile)
         self.traces[session_id] = []
         self._session_order.append(session_id)
         while len(self._session_order) > self.config.max_retained_sessions:
@@ -69,6 +70,7 @@ class CartographerEngine:
         output_limit = min(10, top_k)
         depth = output_limit
         schedule = self.config.recommendation_depth_schedule
+        gate_reason = "disabled"
         if schedule and turn < self.config.recommendation_depth_full_turn:
             # Precision gate: on early turns of the current intent epoch,
             # recommend only the products we would bet on. A hesitant shortlist
@@ -88,6 +90,11 @@ class CartographerEngine:
                     1 for event in self.traces[session_id] if event.intent_epoch == state.intent_epoch
                 )
                 depth = min(output_limit, max(1, schedule[min(epoch_turn, len(schedule)) - 1]))
+                gate_reason = "informative question" if depth < output_limit else "scheduled full depth"
+            else:
+                gate_reason = "no sufficiently informative question"
+        elif schedule:
+            gate_reason = "full-turn safety release"
         ranked_hits = retrieval.hits
         if state.route == "browsing" and self.config.diversify_browsing:
             ranked_hits = diversify_browsing(ranked_hits, self.catalog, depth)
@@ -120,6 +127,9 @@ class CartographerEngine:
             dense_enabled=self.retriever.semantic.enabled,
             cross_encoder_enabled=self.retriever.cross_encoder.enabled,
             learned_reranker_enabled=self.retriever.learned_reranker.enabled,
+            recommendation_depth=depth,
+            depth_gate_active=depth < output_limit,
+            depth_gate_reason=gate_reason,
         )
         self.traces[session_id].append(trace)
         return {

@@ -94,7 +94,11 @@ def validate_manifest(
     if manifest.get("format_version") != FORMAT_VERSION:
         raise ValueError("unsupported split manifest format")
     source = manifest.get("source") or {}
-    if source.get("sha256") != file_sha256(dataset_path):
+    expected_sha256 = source.get("sha256")
+    raw_bytes = Path(dataset_path).read_bytes()
+    raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    normalized_sha256 = hashlib.sha256(raw_bytes.replace(b"\r\n", b"\n")).hexdigest()
+    if expected_sha256 not in {raw_sha256, normalized_sha256}:
         raise ValueError("split manifest dataset checksum does not match")
     all_ids = [str(sample["sample_id"]) for sample in samples]
     if len(all_ids) != len(set(all_ids)):

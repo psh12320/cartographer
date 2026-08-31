@@ -4,7 +4,7 @@
 
 1. `reset` creates an isolated session with the supplied aggregate profile.
 2. The context compiler extracts category and constraints from the current message.
-3. Corrections deactivate constraints from the previous intent epoch; boundary answers exhaust the requested attribute.
+3. Corrections deactivate the superseded initial preference, retain unrelated requirements disclosed through clarification, and start a new text epoch; boundary answers exhaust the requested attribute.
 4. The router selects Buying or Browsing weights.
 5. Fingerprint, category, FTS5, and optional BGE routes produce a candidate union.
 6. Safe hard filters and local reranking produce a candidate posterior.
@@ -33,4 +33,3 @@ The catch-all `other` attribute is penalized and becomes available only after a 
 ## Offline behavior
 
 The core agent is standard-library only. BGE and the cross-encoder are loaded exclusively from local index assets and are surrounded by a fail-closed optional boundary. Missing ML dependencies, corrupt assets, or a mismatched catalog disable only that route, never the whole agent.
-

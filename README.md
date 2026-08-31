@@ -118,7 +118,7 @@ Inspect a complete conversational trace:
 python -m cartographer.demo --sample-id public_0002
 ```
 
-Launch the local evaluator observatory to inspect every target, replay complete conversations, view every recommended product and inference feature, compare the deterministic and learned rerankers, and start a fresh-process evaluation after any saved code update. A dataset-scope selector switches all panels between the public 200, an optional held-out set such as `synthetic_800_v1.jsonl`, and the two merged:
+Launch the local evaluator observatory to inspect every target, replay the full agent beside a selected component ablation, explain every recommendation's dominant score signals, measure reranker/gate/retrieval/state/clarification value overall and by scenario, and start a fresh-process evaluation after any saved code update. A dataset-scope selector switches all panels between the public 200, an optional held-out set such as `synthetic_800_v1.jsonl`, and the two merged:
 
 ```bash
 python -m pip install -r requirements-dashboard.txt

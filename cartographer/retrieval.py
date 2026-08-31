@@ -147,14 +147,14 @@ class HybridRetriever:
                     break
             candidate_indices = limited
 
-        profile_keys = profile_attributes(state.user_profile)
+        profile_keys = profile_attributes(state.user_profile) if self.config.enable_profile else set()
         profile_text = " ".join(
             [
                 *(str(value) for value in state.user_profile.get("preference_tags") or []),
                 str(state.user_profile.get("summary") or ""),
             ]
         )
-        profile_terms = set(terms(profile_text, 40))
+        profile_terms = set(terms(profile_text, 40)) if self.config.enable_profile else set()
         hits: list[SearchHit] = []
         for product_index in candidate_indices:
             product = self.catalog.products[product_index]
@@ -180,9 +180,14 @@ class HybridRetriever:
                 profile_score = 0.75 * textual_profile_score + 0.25 * attribute_profile_score
             review_volume = min(1.0, math.log1p(product.rating_number) / 10.0)
             rating_quality = product.average_rating / 5.0
-            popularity = review_volume * (
-                (1.0 - self.config.popularity_rating_mix)
-                + self.config.popularity_rating_mix * rating_quality
+            popularity = (
+                review_volume
+                * (
+                    (1.0 - self.config.popularity_rating_mix)
+                    + self.config.popularity_rating_mix * rating_quality
+                )
+                if self.config.enable_popularity
+                else 0.0
             )
             weights = self.config.weights
             if state.route == "buying":

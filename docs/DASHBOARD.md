@@ -33,7 +33,7 @@ Scope selection changes what you *observe*, not what is permitted to drive decis
 
 ## Session replay
 
-Select any session in the active scope, choose the runtime features to enable, and replay the exact deterministic evaluator loop. The view shows:
+Select any session and choose one or more components to remove. The dashboard runs the exact evaluator loop twice: once with the full current agent and once with the selected ablation. Selecting a single component gives the cleanest demonstration of its marginal value; selecting several exposes interactions. The view shows:
 
 - Every evaluator/customer message and every agent response.
 - The structured `ask_attribute` used by the simulator.
@@ -41,9 +41,13 @@ Select any session in the active scope, choose the runtime features to enable, a
 - Every recommended product on every turn with title, category, price, rating, and review count.
 - Final score, pre-learned score, exact matches, constraint coverage, category agreement, BM25, dense similarity/rank, profile alignment, popularity, learned residual, and cross-encoder score.
 - Route, intent epoch, active constraints, compiled query, candidate count, target candidate position, entropy, information gain, cache use, and latency.
+- Returned recommendation depth, whether the precision gate activated, and why it held or released the full list.
+- A paired per-session TechnicalScore contribution, turn, rank, and reciprocal-rank delta.
+- Full-agent and ablated conversations, turn state, ranked products, and inference JSON side by side.
+- The largest additive score contributions for every recommendation, including fingerprints, constraints, BM25, profile, popularity, learned residual, and optional semantic scores.
 - Evidence-based hints that distinguish retrieval, ranking, parsing, and clarification failures.
 
-The replay defaults to the deterministic rule-based ranker. The learned reranker and BGE route are explicit toggles. BGE fails closed when a verified embedding artifact is not installed.
+The component selector exposes individual ablations for lexical FTS5/BM25, category retrieval, intent fingerprints and safe filtering, multi-turn state, entropy clarification, aggregate-profile personalization, popularity, the frozen reranker, the precision recommendation-depth gate, Browsing diversification, and the optional BGE route. BGE fails closed when a verified embedding artifact is not installed.
 
 ## All expected products
 
@@ -51,14 +55,30 @@ The target browser maps each session in the selected scope to its expected ASIN 
 
 The repository now records a locked 100/100 split in `docs/public_split_v1.json`. The dashboard can technically display both partitions because all 200 labels are public, but future model selection must use only the development IDs. The holdout was consumed once for the result in `docs/holdout_v1_results.json`; repeatedly tuning against its target browser or live result would invalidate it as unseen evidence.
 
-## Reranker A/B
+## Component value lab
 
-The batch view runs the unchanged evaluator twice on the same selected prefix:
+The batch view runs the unchanged evaluator on the same selected prefix with:
 
-1. Deterministic baseline with learned reranking disabled.
-2. Frozen learned residual reranker enabled.
+1. The full current agent.
+2. One separate run per selected component with only that component removed.
 
-It reports overall and per-scenario Hit Rate, MRR, MTTC, Efficiency, TechnicalScore, latency, and per-session changes in turn and reciprocal rank. These are public-development diagnostics, not private-test estimates.
+It reports overall and per-scenario Hit Rate, MRR, MTTC, Efficiency, TechnicalScore, latency, and per-session changes in turn, rank, reciprocal rank, and exact TechnicalScore contribution. Positive `full minus ablated` values mean the component helped on that slice. These are public-development diagnostics, not private-test estimates.
+
+The panel also emits report-ready JSON containing the full-agent metrics, component values, model choice, API/network/cost/token disclosure, and limitations. Use development-only scopes for component selection. A held-out or synthetic scope may be displayed for an already frozen confirmation, but must not become a tuning loop.
+
+## Report and video evidence
+
+The dedicated deliverable map identifies where to capture every required proof:
+
+- Architecture and active-component inventory.
+- One complete multi-turn evaluator conversation.
+- Reranker and precision-gate value with and without each component.
+- Transparent recommendation explanations.
+- Overall and per-scenario metrics and latency.
+- Model, network, cost, and token disclosure.
+- Limitations and the remaining team-contribution section.
+
+For the demo video, select one component at a time. Show an Intent Override replay, point out the intent epoch and retained constraints, then compare gate depth and target rank with the gate removed. Repeat with only the reranker removed, and finish on the component-value and operational-disclosure panels.
 
 ## Live latest-code test
 

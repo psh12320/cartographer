@@ -84,6 +84,8 @@ class AgentConfig:
     enable_learned_reranker: bool = True
     enable_state: bool = True
     enable_clarification: bool = True
+    enable_profile: bool = True
+    enable_popularity: bool = True
     diversify_browsing: bool = True
     bge_query_instruction: str = "Represent this sentence for searching relevant passages: "
     weights: SearchWeights = field(default_factory=SearchWeights)

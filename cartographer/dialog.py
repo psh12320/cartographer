@@ -50,6 +50,7 @@ class DialogManager:
         message = user_message.strip()
         if not preserve_state:
             state.constraints.clear()
+            state.replaceable_constraint = None
             state.intent_messages.clear()
             state.asked_attributes.clear()
             state.declined_attributes.clear()
@@ -63,13 +64,32 @@ class DialogManager:
         override = bool(OVERRIDE_RE.search(message))
         if override:
             state.intent_epoch += 1
-            for constraint in state.constraints:
-                constraint.active = False
+            superseded = state.replaceable_constraint
+            if superseded is None or not superseded.active:
+                # Compatibility fallback for states created before explicit
+                # replaceable-preference tracking was introduced.
+                active = [constraint for constraint in state.constraints if constraint.active]
+                if active:
+                    earliest_turn = min(constraint.source_turn for constraint in active)
+                    superseded = next(
+                        (
+                            constraint
+                            for constraint in active
+                            if constraint.source_turn == earliest_turn
+                            and constraint.strength == "soft"
+                        ),
+                        next(
+                            constraint
+                            for constraint in active
+                            if constraint.source_turn == earliest_turn
+                        ),
+                    )
+            if superseded is not None:
+                superseded.active = False
+            state.replaceable_constraint = None
             state.route = "buying"
             state.override_shortlist = set(state.seen_products)
             state.seen_products.clear()
-            state.asked_attributes.clear()
-            state.declined_attributes.clear()
             state.last_asked = None
             state.cached_hits.clear()
             state.last_query_signature = ()
@@ -95,8 +115,17 @@ class DialogManager:
         elif message and not NO_PREFERENCE_RE.search(message) and "no additional preference" not in message.lower():
             extracted.extend((value, "soft") for value in self._extract_explicit_values(message))
 
+        if override:
+            extracted = [(value, "hard") for value, _strength in extracted]
+
         for value, strength in extracted:
-            self._add_constraint(state, value, strength, turn)
+            constraint = self._add_constraint(state, value, strength, turn)
+            if constraint is None:
+                continue
+            if state.replaceable_constraint is None and (
+                override or (turn == 1 and state.intent_epoch == 0 and strength == "soft")
+            ):
+                state.replaceable_constraint = constraint
 
         if message and not NO_PREFERENCE_RE.search(message) and "no additional preference" not in message.lower():
             # Keep the user's full phrasing for lexical/semantic ranking. Epoch filtering
@@ -136,22 +165,27 @@ class DialogManager:
         return values
 
     @staticmethod
-    def _add_constraint(state: SessionState, value: str, strength: str, turn: int) -> None:
+    def _add_constraint(
+        state: SessionState,
+        value: str,
+        strength: str,
+        turn: int,
+    ) -> Constraint | None:
         value = value.strip(" ,.;")
         key = canonical(value)
         if not key:
-            return
+            return None
         for existing in state.constraints:
             if existing.active and canonical(existing.value) == key:
                 if strength == "hard":
                     existing.strength = "hard"
-                return
-        state.constraints.append(
-            Constraint(
-                attribute=classify_constraint(value),
-                value=value,
-                strength=strength,
-                source_turn=turn,
-                epoch=state.intent_epoch,
-            )
+                return existing
+        constraint = Constraint(
+            attribute=classify_constraint(value),
+            value=value,
+            strength=strength,
+            source_turn=turn,
+            epoch=state.intent_epoch,
         )
+        state.constraints.append(constraint)
+        return constraint

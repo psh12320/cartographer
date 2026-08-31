@@ -27,6 +27,7 @@ class SessionState:
     route: str = "browsing"
     category: str = ""
     constraints: list[Constraint] = field(default_factory=list)
+    replaceable_constraint: Constraint | None = None
     intent_messages: list[IntentMessage] = field(default_factory=list)
     intent_epoch: int = 0
     asked_attributes: set[str] = field(default_factory=set)
@@ -98,3 +99,6 @@ class TraceEvent:
     dense_enabled: bool = False
     cross_encoder_enabled: bool = False
     learned_reranker_enabled: bool = False
+    recommendation_depth: int = 10
+    depth_gate_active: bool = False
+    depth_gate_reason: str = "disabled"
