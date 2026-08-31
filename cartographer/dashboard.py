@@ -372,8 +372,12 @@ class DashboardBackend:
         dataset_path: str | Path = "data/public_set.jsonl",
         index_dir: str | Path = "data/cartographer_index",
         extra_datasets: Sequence[str | Path] = (),
+        ranker_path: str | Path | None = None,
     ) -> None:
         self.catalog_path = str(catalog_path)
+        # An alternate artifact can be shown without replacing the promoted one,
+        # which stays bound to the locked development partition.
+        self.ranker_path = Path(ranker_path) if ranker_path else None
         self.index_dir = Path(index_dir)
         self.identifiers, self.categories, self.raw_products = catalog_index(self.catalog_path)
         self.catalog = CatalogIndex(self.catalog_path, index_dir)
@@ -443,6 +447,26 @@ class DashboardBackend:
             for sample in scope["samples"]:
                 handle.write(json.dumps(sample) + "\n")
         return str(target)
+
+    def ranker_banner(self) -> str:
+        """State which reranker artifact this dashboard session is showing."""
+
+        import json as _json
+
+        path = self.ranker_path or AgentConfig().ranker_path
+        try:
+            training = _json.loads(Path(path).read_text(encoding="utf-8"))["training"]
+            split = training.get("data_split", {})
+            sessions = split.get("partition_sample_count", training.get("sample_count", "?"))
+            partition = split.get("partition", "?")
+            oof = training.get("cross_validation", {}).get("out_of_fold_technical_score")
+            score = f", grouped out-of-fold TechnicalScore `{oof:.6f}`" if oof else ""
+            return (
+                f"**Reranker artifact:** `{Path(path).name}` — trained on the **{partition}** "
+                f"partition ({sessions} sessions){score}."
+            )
+        except Exception:
+            return f"**Reranker artifact:** `{path}`"
 
     def choices(self) -> list[tuple[str, str]]:
         choices: list[tuple[str, str]] = []
@@ -516,6 +540,7 @@ class DashboardBackend:
                 () if "gate" in disabled else AgentConfig().recommendation_depth_schedule
             ),
             enable_cross_encoder=False,
+            **({"ranker_path": self.ranker_path} if self.ranker_path else {}),
         )
 
     def replay(
@@ -1146,7 +1171,18 @@ class DashboardBackend:
             )
         return rows
 
-    def stream_live_evaluation(self):
+    def resolve_scope_path(self, name: str | None) -> str:
+        """Dataset path for `name`, independent of any mutated backend state.
+
+        The panels must not depend on a previous change event having fired:
+        the dropdown value is authoritative, and it is also per-browser, so two
+        viewers cannot clobber each other's selection.
+        """
+
+        scope = self.scopes.get(name or "")
+        return self._materialize(scope) if scope else self.dataset_path
+
+    def stream_live_evaluation(self, scope_name: str | None = None):
         """Run all 200 sessions in a new interpreter so disk edits are imported."""
 
         timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1159,10 +1195,12 @@ class DashboardBackend:
             "--catalog",
             self.catalog_path,
             "--dataset",
-            self.dataset_path,
+            self.resolve_scope_path(scope_name),
             "--output",
             str(output_path),
         ]
+        if self.ranker_path:
+            command.extend(["--ranker", str(self.ranker_path)])
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         process = subprocess.Popen(
             command,
@@ -1324,6 +1362,7 @@ def build_dashboard(backend: DashboardBackend):
                 scale=3,
             )
             scope_note = gr.Markdown(f"Active scope: **{backend.scope_name}**")
+        gr.Markdown(backend.ranker_banner(), elem_classes="warning-box")
         with gr.Tab("Session replay"):
             with gr.Row():
                 session = gr.Dropdown(
@@ -1538,7 +1577,7 @@ The dashboard is diagnostic evidence, not the official response surface. Expecte
             live_artifact = gr.File(label="Download complete evaluation JSON", interactive=False)
             live_event = start_live.click(
                 fn=backend.stream_live_evaluation,
-                inputs=[],
+                inputs=[scope],
                 outputs=[
                     live_status,
                     live_overall,
@@ -1601,6 +1640,14 @@ def main() -> None:
         ),
     )
     parser.add_argument("--index-dir", default="data/cartographer_index")
+    parser.add_argument(
+        "--ranker",
+        default=None,
+        help=(
+            "Alternate reranker artifact to display, e.g. one trained on all 200 public "
+            "sessions. The promoted cartographer/ranker_weights.json is left untouched."
+        ),
+    )
     parser.add_argument("--server-name", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
@@ -1616,7 +1663,9 @@ def main() -> None:
     parser.add_argument("--inbrowser", action="store_true")
     args = parser.parse_args()
     extra = DEFAULT_EXTRA_DATASETS if args.extra_dataset is None else tuple(args.extra_dataset)
-    backend = DashboardBackend(args.catalog, args.dataset, args.index_dir, extra_datasets=extra)
+    backend = DashboardBackend(
+        args.catalog, args.dataset, args.index_dir, extra_datasets=extra, ranker_path=args.ranker
+    )
     demo = build_dashboard(backend)
     auth = None
     if args.auth:

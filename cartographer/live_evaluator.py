@@ -104,7 +104,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest = source_manifest(root)
     git = git_metadata(root)
     started = time.perf_counter()
-    agent = Agent(args.catalog)
+    config = None
+    if args.ranker:
+        from .config import AgentConfig
+
+        config = AgentConfig(catalog_path=Path(args.catalog), ranker_path=Path(args.ranker))
+    agent = Agent(args.catalog, config=config)
     initialization_seconds = time.perf_counter() - started
     metadata = {
         "kind": "fresh_process_official_evaluator_replay",
@@ -192,6 +197,11 @@ def main() -> None:
     )
     parser.add_argument("--catalog", default="data/catalog.jsonl")
     parser.add_argument("--dataset", default="data/public_set.jsonl")
+    parser.add_argument(
+        "--ranker",
+        default=None,
+        help="Alternate reranker artifact; defaults to the promoted cartographer/ranker_weights.json.",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
