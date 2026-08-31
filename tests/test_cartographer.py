@@ -165,13 +165,48 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual(set(response), {"message", "ask_attribute", "recommendations", "usage"})
         self.assertIn(response["ask_attribute"], ALLOWED_ATTRIBUTES)
         self.assertLessEqual(len(response["recommendations"]), 10)
+        # The default precision-gated depth schedule recommends a single
+        # high-confidence product on the first turn of an intent epoch.
+        self.assertEqual(len(response["recommendations"]), 1)
+
+    def test_depth_schedule_expands_across_turns_and_full_turn_override(self) -> None:
+        config = self.config.with_overrides(
+            recommendation_depth_schedule=(1, 2, 10),
+            recommendation_depth_full_turn=4,
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("depth", {"preference_tags": []})
+        first = engine.respond("depth", "I'm looking for Men Shirts.", 1, 10)
+        self.assertEqual(len(first["recommendations"]), 1)
+        second = engine.respond("depth", "I like a breathable layer.", 2, 10)
+        self.assertEqual(len(second["recommendations"]), 2)
+        third = engine.respond("depth", "Still browsing.", 3, 10)
+        self.assertEqual(len(third["recommendations"]), 5)
+        fourth = engine.respond("depth", "Anything else?", 4, 10)
+        self.assertEqual(len(fourth["recommendations"]), 5)
+
+    def test_depth_gate_yields_full_list_when_no_question_is_informative(self) -> None:
+        config = self.config.with_overrides(
+            recommendation_depth_schedule=(1, 2, 10),
+            depth_gate_min_information_gain=1e9,
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("gate", {"preference_tags": []})
+        response = engine.respond("gate", "I'm looking for Men Shirts.", 1, 10)
+        self.assertEqual(len({item["parent_asin"] for item in response["recommendations"]}), 5)
+
+    def test_empty_depth_schedule_returns_full_lists(self) -> None:
+        config = self.config.with_overrides(recommendation_depth_schedule=())
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("full", {"preference_tags": []})
+        response = engine.respond("full", "I'm looking for Men Shirts.", 1, 10)
         self.assertEqual(len({item["parent_asin"] for item in response["recommendations"]}), 5)
 
     def test_boundary_and_empty_message_have_valid_fallbacks(self) -> None:
         engine = CartographerEngine(self.catalog_path, self.config)
         engine.reset("boundary", {"preference_tags": []})
         first = engine.respond("boundary", "", 1, 10)
-        self.assertEqual(len(first["recommendations"]), 5)
+        self.assertEqual(len(first["recommendations"]), 1)
         asked = first["ask_attribute"]
         second = engine.respond(
             "boundary",

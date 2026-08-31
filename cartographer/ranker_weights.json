@@ -15,56 +15,56 @@
   ],
   "routes": {
     "buying": {
-      "base_score": 0.1857414080428718,
-      "exact_matches": 1.5589899873329627,
-      "constraint_score": 1.2465229300067462,
-      "category_score": 2.6695780127829902,
-      "bm25_score": 0.836839271452148,
+      "base_score": 0.19118551472367123,
+      "exact_matches": 1.5201870231139047,
+      "constraint_score": 1.3842856178997,
+      "category_score": 2.7232152954666438,
+      "bm25_score": 0.9493054551338709,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": 0.6523650909321846,
-      "popularity_score": 5.667902548338497
+      "profile_score": 0.6253385535404633,
+      "popularity_score": 5.511379724167727
     },
     "browsing": {
-      "base_score": 0.0,
+      "base_score": -0.20423659354045,
       "exact_matches": 0.0,
       "constraint_score": 0.0,
-      "category_score": 0.0,
-      "bm25_score": 0.0,
+      "category_score": 0.43825766776268804,
+      "bm25_score": -3.4537130039036357,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": 0.0,
-      "popularity_score": 0.0
+      "profile_score": -0.05949282123322572,
+      "popularity_score": 5.508877050996843
     },
     "boundary": {
-      "base_score": -0.23554636773253457,
-      "exact_matches": 0.9471902351628371,
-      "constraint_score": 1.7281561718353622,
-      "category_score": 2.849123486586433,
-      "bm25_score": -1.1399922210552147,
+      "base_score": -0.2792856317751932,
+      "exact_matches": 0.7447835259731664,
+      "constraint_score": 1.6565698484105063,
+      "category_score": 3.5988880680222035,
+      "bm25_score": -1.2960766845677845,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": 0.4957522376556803,
-      "popularity_score": 5.738658497850727
+      "profile_score": 0.5999037062479906,
+      "popularity_score": 5.2231715939677485
     },
     "override": {
-      "base_score": 0.4008150938602544,
-      "exact_matches": 1.7354641226664818,
+      "base_score": 0.4124526248446684,
+      "exact_matches": 1.0136267791171847,
       "constraint_score": 0.0,
-      "category_score": 2.6758241633636537,
-      "bm25_score": -0.17531419366755094,
+      "category_score": 3.2157300912107285,
+      "bm25_score": -0.9746153026133254,
       "dense_score": 0.0,
       "dense_rank_score": 0.0,
       "dense_constraint_agreement": 0.0,
       "dense_category_agreement": 0.0,
-      "profile_score": -1.2077169521289066,
-      "popularity_score": 6.565534505086483
+      "profile_score": -1.0500240587623868,
+      "popularity_score": 6.359507472558174
     },
     "default": {
       "base_score": 0.0,
@@ -82,20 +82,20 @@
   },
   "training": {
     "sample_count": 100,
-    "snapshot_count": 182,
+    "snapshot_count": 211,
     "route_snapshots": {
-      "buying": 107,
+      "buying": 130,
       "browsing": 45,
-      "boundary": 13,
-      "override": 17
+      "boundary": 15,
+      "override": 21
     },
     "dense_enabled": false,
     "dense_failure_reason": null,
     "pair_counts": {
-      "buying": 3210,
-      "browsing": 0,
-      "boundary": 390,
-      "override": 510,
+      "buying": 3882,
+      "browsing": 1350,
+      "boundary": 450,
+      "override": 630,
       "default": 0
     },
     "epochs": 60,
@@ -106,12 +106,21 @@
     "learned_reranker_route_scales": {
       "buying": 1.25,
       "boundary": 0.75,
-      "override": 0.75
+      "override": 0.75,
+      "browsing": 0.75
     },
     "include_ranker_route_in_cache_key": false,
+    "exact_match_feature_cap": 2.0,
+    "recommendation_depth_schedule": [
+      1,
+      2,
+      10
+    ],
+    "recommendation_depth_full_turn": 6,
     "semantic_config": null,
     "active_routes": [
       "boundary",
+      "browsing",
       "buying",
       "override"
     ],
@@ -119,33 +128,33 @@
     "includes_product_identifiers_as_features": false,
     "data_split": {
       "manifest": "docs/public_split_v1.json",
-      "manifest_sha256": "2e92573ca1275da9243135fd1dd0899138f0db971d52c08a3d9810ceb3d0169b",
+      "manifest_sha256": "342866b37304c8b0b57a59f1bae2d9a53157be502d3149c45f195f10172742a7",
       "name": "public-stratified-100-100-v1",
       "partition": "development",
       "partition_sample_count": 100,
-      "dataset_sha256": "571359a8a69014c43fc30d39c996c4a28e875dccc249dffc707358757beb16c0"
+      "dataset_sha256": "857259f7a438e6188ac63e18995b6ff4489bfcfc4a716a798b9a2aa0ee8f7579"
     },
     "cross_validation": {
       "baseline_fold_scores": [
-        0.8538035,
-        0.9223750000000001,
-        0.901643,
-        0.9152501,
-        0.8875001
+        0.95625,
+        0.94375,
+        0.9205001,
+        0.9457500000000001,
+        0.9325
       ],
       "fold_scores": [
-        0.9306429,
-        0.954875,
-        0.8903334,
-        0.9337500999999999,
-        0.9424999000000001
+        0.9850000000000001,
+        0.984,
+        0.9495000000000001,
+        0.9810000000000001,
+        0.9697500000000001
       ],
-      "mean_fold_score": 0.93042026,
-      "baseline_technical_score": 0.8961144,
-      "out_of_fold_technical_score": 0.9304202,
-      "out_of_fold_gain": 0.034306,
+      "mean_fold_score": 0.97385,
+      "baseline_technical_score": 0.9397498999999999,
+      "out_of_fold_technical_score": 0.97385,
+      "out_of_fold_gain": 0.0341,
       "out_of_fold_session_count": 100,
-      "stable_folds": 4,
+      "stable_folds": 5,
       "baseline_scenario_metrics": {
         "boundary": {
           "sample_count": 5,
@@ -156,20 +165,20 @@
         "browsing": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.761131,
-          "mttc": 2.075
+          "mrr": 0.902083,
+          "mttc": 2.325
         },
         "buying": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.718125,
-          "mttc": 1.65
+          "mrr": 0.91125,
+          "mttc": 2.025
         },
         "intent_override": {
           "sample_count": 15,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.658968,
-          "mttc": 3.6
+          "mrr": 0.866667,
+          "mttc": 3.866667
         }
       },
       "out_of_fold_scenario_metrics": {
@@ -177,28 +186,28 @@
           "sample_count": 5,
           "hit_rate_at_10": 1.0,
           "mrr": 1.0,
-          "mttc": 3.2
+          "mttc": 2.4
         },
         "browsing": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.860933,
-          "mttc": 1.925
+          "mrr": 0.975,
+          "mttc": 1.75
         },
         "buying": {
           "sample_count": 40,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.770903,
-          "mttc": 1.075
+          "mrr": 0.98125,
+          "mttc": 1.425
         },
         "intent_override": {
           "sample_count": 15,
           "hit_rate_at_10": 1.0,
-          "mrr": 0.826667,
-          "mttc": 3.466667
+          "mrr": 0.966667,
+          "mttc": 3.866667
         }
       },
-      "maximum_fold_p95_latency_ms": 543.443,
+      "maximum_fold_p95_latency_ms": 182.194,
       "promotion": {
         "eligible": true,
         "minimum_gain": 0.005,

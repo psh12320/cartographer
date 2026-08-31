@@ -33,6 +33,7 @@ class HybridRetriever:
             config.enable_learned_reranker,
             config.learned_reranker_scale,
             dict(config.learned_reranker_route_scales),
+            exact_cap=config.exact_match_feature_cap,
         )
 
     def search(self, state: SessionState) -> RetrievalResult:

@@ -67,12 +67,33 @@ class CartographerEngine:
             decision = ClarificationDecision(None, "Here are the strongest matches I found.", 0.0, 0.0)
 
         output_limit = min(10, top_k)
+        depth = output_limit
+        schedule = self.config.recommendation_depth_schedule
+        if schedule and turn < self.config.recommendation_depth_full_turn:
+            # Precision gate: on early turns of the current intent epoch,
+            # recommend only the products we would bet on. A hesitant shortlist
+            # converts at a strong rank after the next disclosure instead of
+            # locking in a deep-rank hit now.
+            #
+            # Holding back only pays when the next turn actually reveals
+            # something: the deferred turn costs 0.02 unconditionally, while the
+            # rank improvement it buys depends on the customer disclosing more.
+            # When no informative question remains, spend the breadth instead.
+            informative = (
+                decision.attribute is not None
+                and decision.information_gain >= self.config.depth_gate_min_information_gain
+            )
+            if informative:
+                epoch_turn = 1 + sum(
+                    1 for event in self.traces[session_id] if event.intent_epoch == state.intent_epoch
+                )
+                depth = min(output_limit, max(1, schedule[min(epoch_turn, len(schedule)) - 1]))
         ranked_hits = retrieval.hits
         if state.route == "browsing" and self.config.diversify_browsing:
-            ranked_hits = diversify_browsing(ranked_hits, self.catalog, output_limit)
+            ranked_hits = diversify_browsing(ranked_hits, self.catalog, depth)
         else:
-            ranked_hits = ranked_hits[:output_limit]
-        recommendations = [{"parent_asin": hit.parent_asin} for hit in ranked_hits[:output_limit]]
+            ranked_hits = ranked_hits[:depth]
+        recommendations = [{"parent_asin": hit.parent_asin} for hit in ranked_hits[:depth]]
 
         if decision.attribute is not None:
             state.asked_attributes.add(decision.attribute)

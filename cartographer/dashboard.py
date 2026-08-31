@@ -8,6 +8,7 @@ import statistics
 import subprocess
 import sys
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,8 @@ from .catalog import CatalogIndex
 from .config import AgentConfig
 from .ranker import route_key
 
+
+DEFAULT_EXTRA_DATASETS = ("synthetic_800_v1.jsonl",)
 
 SESSION_HEADERS = [
     "Session",
@@ -227,13 +230,78 @@ class DashboardBackend:
         catalog_path: str | Path = "data/catalog.jsonl",
         dataset_path: str | Path = "data/public_set.jsonl",
         index_dir: str | Path = "data/cartographer_index",
+        extra_datasets: Sequence[str | Path] = (),
     ) -> None:
         self.catalog_path = str(catalog_path)
-        self.dataset_path = str(dataset_path)
-        self.samples = load_jsonl(self.dataset_path)
-        self.samples_by_id = {str(sample["sample_id"]): sample for sample in self.samples}
+        self.index_dir = Path(index_dir)
         self.identifiers, self.categories, self.raw_products = catalog_index(self.catalog_path)
         self.catalog = CatalogIndex(self.catalog_path, index_dir)
+        self.scopes = self._build_scopes(dataset_path, extra_datasets)
+        self.scope_names = list(self.scopes)
+        self.select_scope(self.scope_names[0])
+
+    def _build_scopes(
+        self,
+        primary: str | Path,
+        extras: Sequence[str | Path],
+    ) -> dict[str, dict[str, Any]]:
+        """One scope per readable dataset, plus a merged scope when several exist."""
+
+        ordered: list[str] = []
+        for candidate in [primary, *extras]:
+            text = str(candidate)
+            if text not in ordered and Path(text).exists():
+                ordered.append(text)
+        if not ordered:
+            raise FileNotFoundError(
+                f"No readable dataset among {[str(primary), *[str(item) for item in extras]]}"
+            )
+        scopes: dict[str, dict[str, Any]] = {}
+        for text in ordered:
+            samples = load_jsonl(text)
+            scopes[f"{Path(text).stem} \u00b7 {len(samples)} sessions"] = {
+                "paths": [text],
+                "samples": samples,
+            }
+        if len(ordered) > 1:
+            merged: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for text in ordered:
+                for sample in load_jsonl(text):
+                    identifier = str(sample["sample_id"])
+                    if identifier in seen:
+                        continue
+                    seen.add(identifier)
+                    merged.append(sample)
+            scopes[f"All datasets \u00b7 {len(merged)} sessions"] = {
+                "paths": list(ordered),
+                "samples": merged,
+            }
+        return scopes
+
+    def select_scope(self, name: str | None) -> str:
+        """Point every panel at one dataset scope; returns the resolved scope name."""
+
+        resolved = name if name in self.scopes else self.scope_names[0]
+        scope = self.scopes[resolved]
+        self.scope_name = resolved
+        self.samples = scope["samples"]
+        self.samples_by_id = {str(sample["sample_id"]): sample for sample in self.samples}
+        self.dataset_path = self._materialize(scope)
+        return resolved
+
+    def _materialize(self, scope: dict[str, Any]) -> str:
+        """A merged scope needs a single file on disk for the fresh-process evaluator."""
+
+        paths = list(scope["paths"])
+        if len(paths) == 1:
+            return paths[0]
+        target = self.index_dir / "dashboard_datasets" / "combined.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", encoding="utf-8") as handle:
+            for sample in scope["samples"]:
+                handle.write(json.dumps(sample) + "\n")
+        return str(target)
 
     def choices(self) -> list[tuple[str, str]]:
         choices: list[tuple[str, str]] = []
@@ -810,12 +878,24 @@ def build_dashboard(backend: DashboardBackend):
             "analysis. The official `Agent.respond` output remains unchanged and never receives these fields.",
             elem_classes="warning-box",
         )
+        with gr.Row():
+            scope = gr.Dropdown(
+                choices=backend.scope_names,
+                value=backend.scope_name,
+                label="Dataset scope",
+                info=(
+                    "Every panel below follows this selection. Held-out sets are for confirmation "
+                    "readouts only; configuration choices stay on the development partition."
+                ),
+                scale=3,
+            )
+            scope_note = gr.Markdown(f"Active scope: **{backend.scope_name}**")
         with gr.Tab("Session replay"):
             with gr.Row():
                 session = gr.Dropdown(
                     choices=backend.choices(),
                     value=backend.samples[0]["sample_id"],
-                    label="Public development session",
+                    label="Session",
                     scale=4,
                 )
                 learned = gr.Checkbox(
@@ -865,15 +945,15 @@ def build_dashboard(backend: DashboardBackend):
                 outputs=[summary, conversation, turns, recommendations, target, profile, inference, decisions],
                 concurrency_limit=1,
             )
-        with gr.Tab("All 200 expected products"):
+        with gr.Tab("All expected products"):
             gr.Markdown(
-                "Each row is one public development user/session. `Expected #1 ASIN` is the evaluator's target."
+                "Each row is one session in the selected scope. `Expected #1 ASIN` is the evaluator's target."
             )
-            gr.Dataframe(
+            all_sessions = gr.Dataframe(
                 value=backend.session_rows(),
                 headers=SESSION_HEADERS,
                 interactive=False,
-                label="Public sessions and expected number-one products",
+                label="Sessions and expected number-one products",
             )
         with gr.Tab("Reranker A/B"):
             gr.Markdown(
@@ -904,13 +984,13 @@ def build_dashboard(backend: DashboardBackend):
             )
         with gr.Tab("Live latest-code test"):
             gr.Markdown(
-                "Run the unchanged evaluator across all 200 public development sessions in a **new Python "
+                "Run the unchanged evaluator across every session in the selected scope in a **new Python "
                 "process**. This imports whatever code is currently saved on disk, even if the dashboard was "
                 "started before your edits. Complete artifacts are stored under the ignored "
                 "`data/cartographer_index/live_runs/` directory."
             )
             with gr.Row():
-                start_live = gr.Button("Start fresh 200-session test", variant="primary")
+                start_live = gr.Button("Start fresh full-scope test", variant="primary")
                 stop_live = gr.Button("Cancel running test", variant="stop")
             live_status = gr.Markdown("No live evaluation is running.")
             with gr.Row():
@@ -956,6 +1036,25 @@ def build_dashboard(backend: DashboardBackend):
 The dashboard deliberately separates these failure modes so “add an LLM” is a measured decision rather than an architectural assumption.
 """
             )
+
+        def _apply_scope(name: str):
+            """Re-point the session picker, the table, and the batch slider."""
+
+            resolved = backend.select_scope(name)
+            count = len(backend.samples)
+            return (
+                f"Active scope: **{resolved}** \u00b7 `{backend.dataset_path}`",
+                gr.update(choices=backend.choices(), value=backend.samples[0]["sample_id"]),
+                gr.update(value=backend.session_rows()),
+                gr.update(maximum=count, value=min(40, count)),
+            )
+
+        scope.change(
+            fn=_apply_scope,
+            inputs=[scope],
+            outputs=[scope_note, session, all_sessions, batch_count],
+            concurrency_limit=1,
+        )
     return demo
 
 
@@ -963,19 +1062,53 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Launch the Cartographer evaluator dashboard")
     parser.add_argument("--catalog", default="data/catalog.jsonl")
     parser.add_argument("--dataset", default="data/public_set.jsonl")
+    parser.add_argument(
+        "--extra-dataset",
+        action="append",
+        default=None,
+        help=(
+            "Additional labelled dataset to expose as a scope; repeatable. Defaults to "
+            "synthetic_800_v1.jsonl when present. Missing files are skipped."
+        ),
+    )
     parser.add_argument("--index-dir", default="data/cartographer_index")
     parser.add_argument("--server-name", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
+    parser.add_argument(
+        "--auth",
+        default=None,
+        help=(
+            "Require a login as USER:PASSWORD. Strongly recommended whenever --server-name is "
+            "not loopback: this dashboard exposes evaluator ground-truth labels and can start "
+            "long CPU evaluations."
+        ),
+    )
     parser.add_argument("--inbrowser", action="store_true")
     args = parser.parse_args()
-    backend = DashboardBackend(args.catalog, args.dataset, args.index_dir)
+    extra = DEFAULT_EXTRA_DATASETS if args.extra_dataset is None else tuple(args.extra_dataset)
+    backend = DashboardBackend(args.catalog, args.dataset, args.index_dir, extra_datasets=extra)
     demo = build_dashboard(backend)
+    auth = None
+    if args.auth:
+        user, separator, password = args.auth.partition(":")
+        if not separator or not user or not password:
+            parser.error("--auth must be USER:PASSWORD")
+        auth = (user, password)
+    elif args.server_name not in {"127.0.0.1", "localhost", "::1"}:
+        print(
+            "WARNING: serving on "
+            f"{args.server_name} without --auth exposes ground-truth labels to anyone who can "
+            "reach this port.",
+            file=sys.stderr,
+            flush=True,
+        )
     demo.queue(default_concurrency_limit=1).launch(
         server_name=args.server_name,
         server_port=args.port,
         share=args.share,
         inbrowser=args.inbrowser,
+        auth=auth,
     )
 
 

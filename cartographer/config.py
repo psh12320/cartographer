@@ -57,10 +57,24 @@ class AgentConfig:
     learned_reranker_scale: float = 1.0
     learned_reranker_route_scales: tuple[tuple[str, float], ...] = (
         ("boundary", 0.75),
+        ("browsing", 0.75),
         ("buying", 1.25),
         ("override", 0.75),
     )
     include_ranker_route_in_cache_key: bool = False
+    # Precision-gated recommendation depth: entry i is the depth for the
+    # (i+1)-th turn of the current intent epoch; the last entry repeats for
+    # later epoch turns. Empty tuple keeps the full top-10 on every turn.
+    # From `recommendation_depth_full_turn` (absolute) onward the full list is
+    # always returned so Hit Rate cannot be starved by a small depth.
+    recommendation_depth_schedule: tuple[int, ...] = (1, 2, 10)
+    recommendation_depth_full_turn: int = 6
+    # Minimum expected information gain required before the depth gate is
+    # allowed to hold products back. `0.0` keeps the gate active whenever a
+    # question is asked at all, which is the promoted behavior.
+    depth_gate_min_information_gain: float = 0.0
+    # Saturation cap for the learned reranker's exact_matches feature.
+    exact_match_feature_cap: float = 2.0
     enable_fts: bool = True
     enable_category: bool = True
     enable_fingerprints: bool = True

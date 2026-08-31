@@ -3,8 +3,9 @@
   "name": "public-stratified-100-100-v1",
   "source": {
     "path": "data/public_set.jsonl",
-    "sha256": "571359a8a69014c43fc30d39c996c4a28e875dccc249dffc707358757beb16c0",
-    "sample_count": 200
+    "sha256": "857259f7a438e6188ac63e18995b6ff4489bfcfc4a716a798b9a2aa0ee8f7579",
+    "sample_count": 200,
+    "note": "sha256 corrected 2026-08-31: the original value 571359a8a69014c43fc30d39c996c4a28e875dccc249dffc707358757beb16c0 was computed on a CRLF checkout of the identical file; sample_ids are unchanged."
   },
   "method": {
     "type": "scenario-stratified deterministic SHA-256 ordering",

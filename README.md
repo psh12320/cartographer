@@ -39,6 +39,7 @@ flowchart LR
 - Optional offline `BAAI/bge-small-en-v1.5` embeddings and MiniLM cross-encoder.
 - Optional route-specific linear reranker promoted only by out-of-fold score gains.
 - Entropy-based next-best-question selection with profile-aware attribute priors.
+- Precision-gated recommendation depth: a one-product shortlist on the first turn of an intent epoch, widening to the full ten as constraints accumulate, with a hard floor that restores full lists on later turns.
 - Implicit negative feedback: products returned on an unsuccessful turn are not repeated.
 - Diagnostic traces kept outside the strict official response schema.
 
@@ -117,7 +118,7 @@ Inspect a complete conversational trace:
 python -m cartographer.demo --sample-id public_0002
 ```
 
-Launch the local evaluator observatory to inspect all 200 targets, replay complete conversations, view every recommended product and inference feature, compare the deterministic and learned rerankers, and start a fresh-process 200-session test after any saved code update:
+Launch the local evaluator observatory to inspect every target, replay complete conversations, view every recommended product and inference feature, compare the deterministic and learned rerankers, and start a fresh-process evaluation after any saved code update. A dataset-scope selector switches all panels between the public 200, an optional held-out set such as `synthetic_800_v1.jsonl`, and the two merged:
 
 ```bash
 python -m pip install -r requirements-dashboard.txt
@@ -137,7 +138,7 @@ Reproduce the locked public split and development-only reranker:
 
 ```bash
 python -m cartographer.data_split
-python -m cartographer.train_ranker --split development --rrf-k 120 --routes buying,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75 --cross-validate --output cartographer/ranker_weights.json
+python -m cartographer.train_ranker --split development --rrf-k 120 --routes buying,browsing,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75,browsing=0.75 --depth-schedule 1,2,10 --cross-validate --output cartographer/ranker_weights.json
 ```
 
 The holdout comparison command is documented in [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md). It is an audit command, not a tuning loop.
@@ -156,7 +157,7 @@ The response contains only `message`, `ask_attribute`, `recommendations`, and ze
 
 ## Evaluation
 
-The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. The active RRF-120 route-scaled reranker was trained on the locked 100-session development partition and achieved five-fold out-of-fold TechnicalScore `0.930420`, versus `0.921516` for the preceding RRF-60 reranker. It retained Hit Rate@10 `1.0` and improved or tied the predecessor in every fold. The consumed 100-session public holdout was deliberately not reopened for this successor; its last independent result, belonging to the recoverable RRF-60 checkpoint `working-holdout-0.916219`, was TechnicalScore `0.916219`. The private 800 remains the only pristine end-to-end confirmation. Full scenario metrics and methodology notes are recorded in [docs/RESULTS.md](docs/RESULTS.md) and [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
+The published starter baseline has Hit Rate@10 `0.125`, MRR `0.068034`, MTTC `9.81`, and computed TechnicalScore `0.10671`. The active configuration pairs the RRF-120 route-scaled reranker with a precision-gated recommendation depth (one product on the first turn of an intent epoch, two on the second, the full ten afterwards) and a learned Browsing residual at scale `0.75`. Trained on the locked 100-session development partition, it achieved five-fold out-of-fold TechnicalScore `0.973850` with Hit Rate@10 `1.0` in every scenario and fold, versus `0.930420` for the preceding depth-ungated champion and `0.921516` for the earlier RRF-60 reranker. The depth gate exists because the evaluator locks in the conversion rank the moment the target appears anywhere in the returned list: deferring an uncertain turn costs `0.02` while converting one rank higher on the next turn recovers up to `0.24`, so the agent recommends only what it would bet on while uncertainty is high. The consumed 100-session public holdout was deliberately not reopened for this successor; its last independent result, belonging to the recoverable RRF-60 checkpoint `working-holdout-0.916219`, was TechnicalScore `0.916219`. The private 800 remains the only pristine end-to-end confirmation. Full scenario metrics and methodology notes are recorded in [docs/RESULTS.md](docs/RESULTS.md) and [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
 
 The runtime package never imports the evaluator, public labels, or ground truth. Fingerprints are derived exclusively from fields visible in the frozen catalog. Development-only demo and experiment commands may use the public evaluator exactly as permitted by the challenge. Future score experiments are restricted to the development 100 and prioritized in [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
 

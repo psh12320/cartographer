@@ -43,6 +43,7 @@ def collect_snapshots(
     config: AgentConfig,
     negative_limit: int = 30,
 ) -> tuple[list[RankingSnapshot], dict[str, object]]:
+    exact_cap = config.exact_match_feature_cap
     identifiers, categories, products = catalog_index(catalog_path)
     shared_catalog = CatalogIndex(catalog_path, config.index_dir)
     agent = Agent(catalog_path, config=config, catalog_index=shared_catalog)
@@ -66,7 +67,7 @@ def collect_snapshots(
             response = agent.respond(session_id, user_message, turn, TOP_K)
             state = agent.engine.sessions[session_id]
             hits = state.cached_hits
-            rows = feature_rows(hits)
+            rows = feature_rows(hits, exact_cap)
             positions = {
                 hit.parent_asin: position for position, hit in enumerate(hits)
             }
@@ -360,6 +361,16 @@ def main() -> None:
         help="Optional route-specific scales, for example buying=1.25,boundary=0.75",
     )
     parser.add_argument("--cache-ranker-route", action="store_true")
+    parser.add_argument("--exact-cap", type=float, default=2.0)
+    parser.add_argument(
+        "--depth-schedule",
+        default=None,
+        help=(
+            "Comma-separated per-epoch-turn recommendation depths, for example 2,10. "
+            "Omit to keep the configured default; pass an empty string to disable gating."
+        ),
+    )
+    parser.add_argument("--depth-full-turn", type=int, default=6)
     parser.add_argument("--with-dense", action="store_true")
     parser.add_argument("--semantic-config", default="semantic_default")
     parser.add_argument("--cross-validate", action="store_true")
@@ -391,12 +402,26 @@ def main() -> None:
     samples = select_split(all_samples, split_manifest, args.split)
     if args.limit > 0:
         samples = samples[: args.limit]
+    if args.depth_schedule is None:
+        depth_schedule = AgentConfig().recommendation_depth_schedule
+    else:
+        try:
+            depth_schedule = tuple(
+                int(value.strip()) for value in args.depth_schedule.split(",") if value.strip()
+            )
+        except ValueError:
+            parser.error(f"invalid depth schedule: {args.depth_schedule}")
+        if any(depth < 1 for depth in depth_schedule):
+            parser.error("depth schedule entries must be positive")
     base = AgentConfig(
         enable_learned_reranker=False,
         rrf_k=args.rrf_k,
         learned_reranker_scale=args.learned_scale,
         learned_reranker_route_scales=tuple(sorted(route_scales.items())),
         include_ranker_route_in_cache_key=args.cache_ranker_route,
+        exact_match_feature_cap=args.exact_cap,
+        recommendation_depth_schedule=depth_schedule,
+        recommendation_depth_full_turn=args.depth_full_turn,
     )
     if args.with_dense:
         choices = semantic_configs(base)
@@ -430,6 +455,9 @@ def main() -> None:
         "learned_reranker_scale": args.learned_scale,
         "learned_reranker_route_scales": route_scales,
         "include_ranker_route_in_cache_key": args.cache_ranker_route,
+        "exact_match_feature_cap": args.exact_cap,
+        "recommendation_depth_schedule": list(depth_schedule),
+        "recommendation_depth_full_turn": args.depth_full_turn,
         "semantic_config": args.semantic_config if args.with_dense else None,
         "active_routes": sorted(active_routes),
         "uses_public_labels_only_during_training": True,

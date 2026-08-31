@@ -29,13 +29,13 @@ def route_key(state: SessionState) -> str:
     return state.route if state.route in {"buying", "browsing"} else "default"
 
 
-def feature_rows(hits: list[SearchHit]) -> list[dict[str, float]]:
+def feature_rows(hits: list[SearchHit], exact_cap: float = 2.0) -> list[dict[str, float]]:
     if not hits:
         return []
     return [
         {
             "base_score": hit.score / (1.0 + abs(hit.score)),
-            "exact_matches": min(1.0, hit.exact_matches / 2.0),
+            "exact_matches": min(1.0, hit.exact_matches / exact_cap),
             "constraint_score": hit.constraint_score,
             "category_score": hit.category_score,
             "bm25_score": hit.bm25_score,
@@ -59,6 +59,7 @@ class LinearReranker:
         enabled: bool,
         scale: float = 1.0,
         route_scales: dict[str, float] | None = None,
+        exact_cap: float = 2.0,
     ) -> None:
         self.enabled = False
         self.failure_reason: str | None = None
@@ -66,6 +67,7 @@ class LinearReranker:
         self.route_scales = {
             str(route): float(value) for route, value in (route_scales or {}).items()
         }
+        self.exact_cap = float(exact_cap)
         self.routes: dict[str, dict[str, float]] = {}
         if not enabled:
             return
@@ -88,6 +90,11 @@ class LinearReranker:
             }
             if not self.routes:
                 raise ValueError("ranker route weights are invalid")
+            # Weights are only meaningful under the saturation cap they were
+            # trained with, so a cap recorded in the artifact wins.
+            training = payload.get("training")
+            if isinstance(training, dict) and "exact_match_feature_cap" in training:
+                self.exact_cap = float(training["exact_match_feature_cap"])
             self.enabled = True
         except Exception as error:
             self.failure_reason = f"Learned ranker unavailable: {error}"
@@ -99,7 +106,7 @@ class LinearReranker:
         weights = self.routes.get(route) or self.routes.get("default")
         if not weights:
             return hits
-        for hit, features in zip(hits, feature_rows(hits)):
+        for hit, features in zip(hits, feature_rows(hits, self.exact_cap)):
             residual = sum(weights[name] * features[name] for name in FEATURE_NAMES)
             hit.learned_score = residual
             hit.score += self.route_scales.get(route, self.scale) * residual

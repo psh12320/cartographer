@@ -2,6 +2,24 @@
 
 The locked public holdout has been consumed. Every experiment below must be selected using only the 100 development IDs in `docs/public_split_v1.json`. Do not rerun the holdout to choose features, weights, routes, thresholds, or models. Use nested development cross-validation when selecting among alternatives.
 
+## Development experiment pass 2: 2026-08-31 (precision-gated depth)
+
+This pass again used only the 100-session development partition; the consumed holdout stayed closed. The RRF-120 route-scaled reranker (`0.930420` OOF) was the comparison point. Five-fold OOF diagnostics showed 25/100 sessions converting at rank greater than one, mostly because the learned residual lifts targets from deterministic rank 25–115 into ranks 2–9 on turn one and the evaluator locks in that rank; sessions that instead convert after one more disclosure land at rank one in 50 of 60 cases.
+
+| Experiment | Development OOF | Decision |
+| --- | ---: | --- |
+| Champion RRF-120 route-scaled | `0.930420` | Reference |
+| Evaluator-aligned attribute taxonomy | `0.930420` | Score-neutral on development; kept as correctness fix |
+| Depth schedule `2,10` | `0.952978` | Superseded |
+| Depth schedule `1,10` | `0.961429` | Superseded |
+| Depth schedule `1,2,10` | `0.968950` | Carry forward (5/5 stable folds) |
+| Depth `1,2,10` + exact-match cap 4 | `0.968950` | Identical outcomes; cap change rejected |
+| Depth `1,2,10` + Browsing residual scale `0.75` | **`0.973850`** | **Promoted** (5/5 stable folds, no blockers) |
+| Depth `1,2,10` + Browsing residual scale `1.0` | `0.973450` | Rejected; `0.75` retained |
+| Promoted + ranker-route cache key (retrained in-run) | `0.971600` | Rejected again; behavior change does not pay on development |
+
+The promoted configuration adds a precision-gated recommendation depth (`recommendation_depth_schedule=(1, 2, 10)` keyed on the turn within the current intent epoch, with a full list forced from absolute turn 6) and a learned Browsing residual at scale `0.75`. One deferred turn costs `0.02` TechnicalScore while a rank-5-to-rank-1 improvement recovers `0.24`, so the agent recommends only what it would bet on while uncertainty is high. OOF scenario metrics: Buying MRR `0.981250`/MTTC `1.425`, Browsing `0.975000`/`1.750`, Override `0.966667`/`3.866667`, Boundary `1.000000`/`2.400`. Hit Rate@10 stayed `1.0` in every scenario and fold. The `classify_constraint` taxonomy was also aligned exactly with the official evaluator's (no brand branch, nine materials, seven color words); this changed no development outcome but removes structurally unanswerable questions.
+
 ## What the one-time audit established
 
 - The development-only reranker improved TechnicalScore by `0.034456` on the disjoint weight holdout, with a paired bootstrap interval of `[0.009670, 0.059391]`.
@@ -52,6 +70,48 @@ Other findings:
 - The BGE matrix and manifest were still absent, so no semantic result was fabricated or inferred.
 
 The route-scaled RRF-120 candidate is installed only in the local working tree. The prior checkpoint remains the recovery point. Because the public holdout is consumed, the private organizer evaluation is the only independent end-to-end confirmation.
+
+## Dense (BGE) evaluation: 2026-08-31 — not promoted
+
+The verified 50,000-row embedding artifact was imported and the dense route was evaluated end to end for the first time. Three independent instruments agree that dense retrieval does not earn promotion on this task.
+
+**1. End-to-end grid (development-100, 26 semantic configurations).** Every configuration landed within `[0.97100, 0.97580]` against an offline baseline of `0.973650`. The best, `dense_constraint_2` (dense `0.8`, constraint-agreement `2.0`), gained `+0.00215`. On 100 sessions a single rank-one-to-two flip is worth `0.0015`, so the entire grid spans about three sessions of resolution and the winner is worth roughly one and a half.
+
+**2. Fixed-message rank replay (the P0 instrument below, now built).** Because end-to-end development scoring is saturated at MRR `0.9775`, ranking quality was measured directly by replaying each session's captured message sequence and recording the target's rank in the score-sorted candidate list. Dense is *worse* in every variant:
+
+| Configuration | Turn-1 MRR | Turn-1 rank-one sessions | All-turn MRR |
+| --- | ---: | ---: | ---: |
+| Offline reference | **`0.628094`** | **49 / 100** | **`0.726025`** |
+| `semantic_default` | `0.602461` | 49 / 100 | `0.716751` |
+| `dense_constraint_1` | `0.601779` | 49 / 100 | `0.715089` |
+| `dense_constraint_2` | `0.596684` | 49 / 100 | `0.711130` |
+| `dense_0.25` | `0.592734` | 46 / 100 | `0.708945` |
+| `dense_rank_1` | `0.567549` | 43 / 100 | `0.700272` |
+
+No dense configuration ever increased the number of sessions whose target ranks first; two configurations reduced it. Dense only reshuffles the tail, and does so unfavourably.
+
+**3. Dense-retrained out-of-fold cross-validation.** Retraining the residual ranker with live dense features under `dense_constraint_2` scored OOF `0.974329` against the promoted `0.973850`, a gain of `+0.000479` — an order of magnitude below the `0.005` promotion threshold. The fitted dense weights are mutually inconsistent across routes (`dense_score` is negative for buying, browsing, and override but positive for boundary), the signature of a feature being fitted to fold-specific noise rather than signal.
+
+**4. Held-out confirmation.** Carried to the 800-session synthetic test set with its own matching dense-trained weights, `dense_constraint_2` scored `0.952038` against the promoted configuration's `0.951764`, a gain of `+0.000274` while raising turn p95 from `89.9 ms` to `160.4 ms`. The held-out set is far from saturated (MRR `0.919`, 110 sessions converting below rank one), so it had ample room to show a dense benefit and did not.
+
+The mechanism is intelligible. The simulated customer discloses constraints that are verbatim substrings of the target product's own feature text, such as `92% Polyester` or `Rubber sole`. Exact fingerprint and lexical matching resolve those precisely, whereas cosine similarity over `bge-small-en-v1.5` blurs across products that are semantically alike but materially different, promoting near-misses into the ranks the deterministic route had already ordered correctly.
+
+Dense therefore remains opt-in and disabled by default. The artifact and its bring-up path are retained: latency was never the obstacle (turn p95 rose only from about `118 ms` to `171 ms`, far inside the `750 ms` gate), and the route may still matter for a catalog or customer simulator whose language is less literal.
+
+Reproducibility note: the GPU-built bundle and an independent CPU rebuild of the same catalog agree to a per-row cosine of `1.000000` and a maximum elementwise difference of `6.9e-07`, with a byte-identical query encoder. Embedding builds are portable across hosts; only the byte-level matrix checksum differs, so `matrix_sha256` must be taken from the bundle actually installed.
+
+## Confidence-released depth gate: 2026-08-31 — rejected
+
+The depth gate's one theoretical weakness is that a withheld turn costs `0.02` unconditionally while the rank improvement it buys depends on the customer actually disclosing more. `depth_gate_min_information_gain` was added to release the gate whenever the chosen question's expected information gain falls below a threshold. Measured expected gain runs from about `0.2` to `8.2`, with a development median of `5.19` at turn one, `2.08` at turn two, and `1.16` at turn three.
+
+| Threshold | Development TechnicalScore | MRR | MTTC |
+| ---: | ---: | ---: | ---: |
+| `0.0` (gate always active) | **`0.973650`** | `0.977500` | `1.980` |
+| `1.0` | `0.973600` | `0.976667` | `1.970` |
+| `2.0` | `0.973600` | `0.976667` | `1.970` |
+| `3.0` | `0.970500` | `0.965000` | `1.950` |
+
+Releasing the gate buys a little MTTC and loses more MRR, and the loss grows as the threshold rises. Withholding is worth it even when the next question looks uninformative, because a turn costs `0.02` while locking in a poor rank costs several times that. The knob is retained at its neutral default of `0.0`, where it only prevents withholding on turns when no question is asked at all — a case in which holding back cannot pay. That refinement is score-neutral on development.
 
 ## P0: Make development diagnostics source-aware
 

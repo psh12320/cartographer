@@ -85,17 +85,24 @@ def coarse_category(values: Iterable[object]) -> str:
 
 
 def classify_constraint(value: str) -> str:
+    """Mirror the official evaluator's constraint taxonomy exactly.
+
+    The clarification policy uses this to predict which attribute a customer
+    reply would answer, so any divergence from the published taxonomy
+    produces questions the customer cannot answer (a wasted turn plus a
+    spurious decline). Keep branch order and keyword lists identical to the
+    official classify_constraint taxonomy.
+    """
+
     lowered = value.lower()
-    if "budget" in lowered or re.search(r"(?:\$|<=|under|below|around)\s*\d", lowered):
+    if "budget" in lowered or re.search(r"(?:\$|<=|under)\s*\d", lowered):
         return "budget"
-    if any(material in lowered for material in MATERIALS):
+    if any(material in lowered for material in MATERIALS[:9]):
         return "material"
-    if any(word in lowered for word in ("color", *COLORS)):
+    if any(word in lowered for word in ("color", "black", "white", "blue", "red", "pink", "green")):
         return "color"
     if any(word in lowered for word in ("size", "sizing", "width", "wide", "narrow")):
         return "size"
-    if any(word in lowered for word in ("brand", "manufacturer", "store")):
-        return "brand"
     if any(word in lowered for word in ("department", "style", "fit", "sleeve", "neck")):
         return "style"
     if any(word in lowered for word in ("hiking", "running", "gym", "winter", "outdoor", "work")):

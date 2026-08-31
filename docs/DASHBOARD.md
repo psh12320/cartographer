@@ -11,9 +11,29 @@ python -m cartographer.dashboard --inbrowser
 
 The default address is `http://127.0.0.1:7860`. Use another port with `--port 7861`. The dashboard runs locally and does not require network access after installation.
 
+## Dataset scope
+
+A **Dataset scope** selector sits above the tabs and re-points every panel — session replay, the target browser, the reranker A/B, and the fresh-process live test. Three scopes are offered when the optional held-out file is present:
+
+| Scope | Sessions | Source |
+| --- | ---: | --- |
+| `public_set` | 200 | `data/public_set.jsonl` |
+| `synthetic_800_v1` | 800 | `synthetic_800_v1.jsonl` |
+| `All datasets` | 1000 | both, merged and de-duplicated by `sample_id` |
+
+The merged scope is written to the ignored path `data/cartographer_index/dashboard_datasets/combined.jsonl` so the fresh-process evaluator can consume it as a single `--dataset`. Scopes are discovered at startup and missing files are skipped silently, so the dashboard still launches with only the public set present.
+
+Expose different files with a repeatable flag; it replaces the default rather than adding to it:
+
+```bash
+python -m cartographer.dashboard --extra-dataset synthetic_800_v1.jsonl --extra-dataset my_probe_set.jsonl
+```
+
+Scope selection changes what you *observe*, not what is permitted to drive decisions. Held-out and synthetic scopes are confirmation readouts; configuration choices must still be made on the development partition through the cross-validation procedure, as `docs/NEXT_EXPERIMENTS.md` requires.
+
 ## Session replay
 
-Select any `public_0001` through `public_0200`, choose the runtime features to enable, and replay the exact deterministic evaluator loop. The view shows:
+Select any session in the active scope, choose the runtime features to enable, and replay the exact deterministic evaluator loop. The view shows:
 
 - Every evaluator/customer message and every agent response.
 - The structured `ask_attribute` used by the simulator.
@@ -25,9 +45,9 @@ Select any `public_0001` through `public_0200`, choose the runtime features to e
 
 The replay defaults to the deterministic rule-based ranker. The learned reranker and BGE route are explicit toggles. BGE fails closed when a verified embedding artifact is not installed.
 
-## All 200 expected products
+## All expected products
 
-The target browser maps each public development session to its expected ASIN and visible catalog metadata. It makes target distribution and repeated product/category patterns easy to audit.
+The target browser maps each session in the selected scope to its expected ASIN and visible catalog metadata. It makes target distribution and repeated product/category patterns easy to audit.
 
 The repository now records a locked 100/100 split in `docs/public_split_v1.json`. The dashboard can technically display both partitions because all 200 labels are public, but future model selection must use only the development IDs. The holdout was consumed once for the result in `docs/holdout_v1_results.json`; repeatedly tuning against its target browser or live result would invalidate it as unseen evidence.
 
