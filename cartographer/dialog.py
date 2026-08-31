@@ -44,6 +44,13 @@ def profile_attributes(profile: dict) -> set[str]:
 
 
 class DialogManager:
+    """Compile customer messages into replaceable session state."""
+
+    def __init__(self, config=None) -> None:
+        from .config import AgentConfig
+
+        self.config = config or AgentConfig()
+
     """Compile free text and history into a compact, replaceable intent frame."""
 
     def update(self, state: SessionState, user_message: str, turn: int, preserve_state: bool = True) -> None:
@@ -60,6 +67,12 @@ class DialogManager:
         if NO_PREFERENCE_RE.search(message) or "no additional preference" in message.lower():
             if state.last_asked:
                 state.declined_attributes.add(state.last_asked)
+                # "please use your judgment" is a deflection, not an exhausted
+                # attribute: the requirement is still held and can still be
+                # disclosed if the question is asked again.
+                deflection = "use your judgment" in message.lower()
+                if deflection and not self.config.boundary_deflection_retires_attribute:
+                    state.deflected_attributes.add(state.last_asked)
 
         override = bool(OVERRIDE_RE.search(message))
         if override:
@@ -105,7 +118,13 @@ class DialogManager:
         hard_match = HARD_RE.search(message)
         matters_match = MATTERS_RE.search(message)
         if hard_match:
-            extracted.extend((value, "hard") for value in self._split_values(hard_match.group(1)))
+            payload = hard_match.group(1)
+            values = (
+                self._split_values(payload)
+                if self.config.split_hard_requirement_values
+                else [payload.strip(" ,.;")]
+            )
+            extracted.extend((value, "hard") for value in values if value)
         elif matters_match:
             extracted.extend((value, "hard") for value in self._split_values(matters_match.group(1)))
         elif category_match:

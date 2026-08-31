@@ -42,12 +42,14 @@ class ClarificationPolicy:
         other_start_turn: int = 3,
         other_multiplier: float = 0.55,
         other_routes: tuple[str, ...] = ("buying", "browsing"),
+        other_max_asks: int = 1,
     ) -> None:
         self.catalog = catalog
         self.pool_size = pool_size
         self.other_start_turn = other_start_turn
         self.other_multiplier = other_multiplier
         self.other_routes = frozenset(other_routes)
+        self.other_max_asks = max(1, int(other_max_asks))
 
     def choose(self, state: SessionState, hits: list[SearchHit], turn: int) -> ClarificationDecision:
         if not hits or turn >= 10:
@@ -62,7 +64,8 @@ class ClarificationPolicy:
         best_gain = -1.0
         typed_best = -1.0
         for attribute in TYPED_ATTRIBUTES:
-            if attribute in state.asked_attributes or attribute in state.declined_attributes:
+            retired = attribute in state.asked_attributes or attribute in state.declined_attributes
+            if retired and attribute not in state.deflected_attributes:
                 continue
             gain, coverage = self._attribute_gain(attribute, pool, probabilities, active_values)
             gain *= 0.5 + 0.5 * coverage
@@ -81,7 +84,7 @@ class ClarificationPolicy:
                 or typed_best < 0.20
             )
         )
-        if allow_other and "other" not in state.asked_attributes:
+        if allow_other and state.other_ask_count < self.other_max_asks:
             other_gain, coverage = self._attribute_gain("other", pool, probabilities, active_values)
             other_gain *= (0.5 + 0.5 * coverage) * self.other_multiplier
             if other_gain > best_gain:

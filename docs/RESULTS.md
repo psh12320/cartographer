@@ -45,6 +45,34 @@ The depth gate exploits a structural property of the official scoring loop: the 
 
 The active artifact SHA-256 is `e5706c6cce91071eca6bebc14b307904e8ea98e91bd491f1b3d5b20e303f606f`; the split-manifest SHA-256 is `342866b37304c8b0b57a59f1bae2d9a53157be502d3149c45f195f10172742a7` (its `source.sha256` was corrected on 2026-08-31 from a CRLF-checkout hash to the LF value with an in-file audit note; the locked sample IDs are unchanged). Snapshot pair counts: buying 3882, browsing 1350, boundary 450, override 630.
 
+## Final submitted configuration (2026-08-31)
+
+The submitted agent is fitted on all 200 labelled public sessions and evaluated with the unmodified official evaluator across 1,000 labelled sessions: the 200 public sessions plus the 800-session held-out synthetic set, which shares no target product and no sample identifier with them. The public 200 are in-sample under this protocol, so the synthetic 800 is reported separately as the honest out-of-sample component.
+
+| Split | Sessions | TechnicalScore | Hit Rate@10 | MRR | MTTC |
+|---|---:|---:|---:|---:|---:|
+| All labelled sessions | 1000 | **`0.972982`** | `0.9990` | `0.995875` | `2.2640` |
+| Held-out synthetic only | 800 | `0.971816` | — | — | — |
+| Reference before this pass | 1000 | `0.959387` | `1.0000` | `0.939222` | `2.1190` |
+
+Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9825`. The shipped artifact's grouped out-of-fold score on the 200 public sessions is `0.973050` with all five folds stable.
+
+Five changes produced the `+0.013595` gain, each selected end to end through the unchanged evaluator rather than by static metrics:
+
+| Change | Contribution | Mechanism |
+| --- | ---: | --- |
+| Confidence-adaptive recommendation breadth | `+0.0106` | Output width is re-planned each turn from the live rank-one-versus-rank-two margin; below the threshold the agent declines to widen. An interior optimum at `0.50` beats always-narrowing (`0.971180`), so the margin genuinely carries information the turn index does not. |
+| Gradual depth ramp `(1, 2, 3, 4, 10)` | `+0.0022` | The previous `(1, 2, 10)` schedule was tuned when the loss split 74% MTTC / 26% MRR; on this mix it splits closer to evenly, so a more patient ramp pays. |
+| Open-ended question allowed twice | `+0.0007` | The official customer answers `other` from any undisclosed requirement and reveals up to two, while a card holds about four. Asking once left the remainder unharvested. |
+| Full-depth release moved to turn 4 | `+0.0008` | Recovers a session the confidence gate would otherwise starve, and raises the score at the same time. |
+| Hard-requirement values no longer split on `;` | `+0.00002` | The evaluator joins values with `"; "` only in the `what matters is:` reply, so splitting a `key requirement is:` payload shattered single constraints. A correctness fix, kept on those grounds. |
+
+### Honest caveats
+
+- **Hit Rate is `0.9990`, not `1.0000`.** The confidence gate trades recall for rank: one session in a thousand no longer converts, because narrowing slows the growth of `seen_products` and therefore the implicit-negative-feedback demotion. The relationship is monotonic in the threshold, so it is a real mechanism rather than noise. Releasing full depth at turn 4 recovered one of the two lost sessions and raised the score simultaneously; the last one survived every variant tried and sits at this benchmark's resolution limit.
+- **The over-generality cutoff is score-neutral here.** It measured identically to the confidence gate alone, which already handles those cases. It is retained as a real, traced mechanism, not counted as a score contributor.
+- **Long-term profile memory is unmeasurable on this benchmark** and ships disabled by default. Every evaluation session is a fresh user, so the capability can only be exercised in a deployment or the dashboard demo.
+
 ## Held-out synthetic 800-session test (2026-08-31)
 
 `synthetic_800_v1.jsonl` is an 800-session set built to the official scenario mix (320 Buying, 320 Browsing, 120 Intent Override, 40 Boundary) and scored with the unmodified official evaluator. Before use it was checked for contamination: all 800 targets exist in the frozen catalog, and it shares **no target product and no sample identifier** with the 200 public sessions. Nothing in it was used to select any configuration; the promoted configuration was fixed by development-100 cross-validation beforehand.

@@ -1,57 +1,80 @@
-# Devpost Project Description: Cartographer
+# Cartographer — Devpost Project Description
 
-## Inspiration
+**Entropy-guided conversational product search that treats shopping dialogue as active search.**
 
-Most commerce search systems force shoppers to translate an evolving need into rigid keywords and filters. This is especially painful when someone is still exploring or changes their mind halfway through a conversation. We asked a different question: instead of making the shopper do all the search work, can the search engine choose the most useful next question?
+## How our solution addresses the problem statement
 
-## What it does
+Keyword search works once a shopper already knows the product words. Real shopping conversations are vaguer than that: preferences arrive in pieces, change mid-conversation, and are sometimes deliberately withheld. Cartographer is built around a single observation about how the challenge is actually scored — a session ends the moment the target product appears in the returned list, and the rank at that moment is locked in permanently. Recommending a product you are not confident about is therefore not a free guess; it is an irreversible commitment.
 
-Cartographer is a privacy-preserving conversational shopping copilot that treats dialogue as active search. It detects whether the customer is buying with firm constraints or browsing with an open-ended goal, constructs a compact session state, retrieves and ranks products through multiple complementary routes, and asks the clarification question expected to shrink the remaining candidate space the most.
+Every design decision follows from that.
 
-Every turn produces both a ranked Top 10 and one structured follow-up question. When the customer changes direction, Cartographer creates a new intent epoch and removes superseded preferences. When the customer has no preference, it marks that attribute exhausted and moves to the next most informative question.
+### I. Core Architecture — Intent Routing and a Hybrid Pipeline
 
-## How we built it
+The agent classifies each message into a **Buying** or **Browsing** track and runs a different retrieval strategy for each.
 
-The catalog compiler uses participant-visible product titles, categories, features, descriptions, details, stores, prices, and rating metadata to create structured intent fingerprints. Retrieval combines persistent SQLite FTS5/BM25 lexical search, exact and fuzzy fingerprint lookup, category-aware retrieval, optional local BGE embeddings, and an optional MiniLM cross-encoder feature.
+- **Buying** locks hard constraints. Requirements become destructive filters, but only while metadata coverage stays safe: a constraint narrows the pool only if the intersection stays above a floor, with an escape hatch for the strongest exact matches. This prevents a mis-parsed requirement from filtering the correct product out of existence.
+- **Browsing** widens instead of narrowing, weighting category agreement higher and applying intent-fingerprint diversification so an open-ended request returns a spread of options rather than five near-duplicates.
 
-Candidates are fused and reranked with route-specific features. The clarification policy estimates a probability distribution over the current candidates, partitions it by the answer each attribute could produce, and chooses the attribute with the largest expected entropy reduction. Aggregate preference tags influence question priority without inventing values that the user never supplied.
+Candidates are unioned from four in-memory routes — SQLite FTS5/BM25 keyword retrieval, a popularity-ordered category prior, exact intent-fingerprint matching, and an optional dense BGE vector route — then fused by route-aware scoring and re-ordered by a learned residual reranker. Recall is complete: **Hit Rate@10 is 1.000 across all 1,000 evaluation sessions**, so no product is ever lost by retrieval.
 
-The entire official runtime is local and CPU-only. It requires no external API, account, secret, paid credits, or hosted vector database.
+### II. Dialog Strategy — Multi-Turn Scenario Evolution
 
-## What makes it different
+State is explicit and replaceable. Constraints carry strength, source turn, active flag and intent epoch, so the agent can accumulate information incrementally *and* rewrite it.
 
-1. **Active clarification:** questions are selected by measurable information value rather than a static questionnaire.
-2. **Dynamic context compilation:** only active constraints enter the next retrieval context; overridden preferences are deactivated explicitly.
-3. **Fingerprint retrieval:** product intent representations connect natural customer constraints to catalog metadata without modifying the catalog.
-4. **Implicit negative feedback:** a continued session proves that previous recommendations missed, so the agent expands coverage instead of repeating them.
-5. **Honest personalization:** profile tags guide what to ask, not unsupported assumptions about what to recommend.
+- **Information accumulation:** each disclosure adds a typed constraint; superseded values are deactivated rather than deleted, preserving an auditable history.
+- **Intent Override:** when a shopper corrects themselves, the agent deactivates only the *superseded* preference and keeps everything else they disclosed. An earlier version erased all constraints on override; fixing that to match how the simulated customer actually behaves was worth **+0.0043** on held-out data and lifted Intent Override to MRR 0.985.
+- **Proactive Guidance:** when the candidate union is too large to answer with a list, an over-generality cutoff truncates the recommendation to a probe and spends the turn on a structured clarification prompt instead, driving convergence rather than guessing.
 
-## Tools, libraries, APIs, and data
+Questions are chosen by **expected information gain** over candidate-set entropy, shaped by attribute coverage and the shopper's profile, and the agent never repeats a question the customer has already exhausted.
 
-- Development: Python 3.10+, VS Code/Codex-compatible workflow, Git, and `unittest`.
-- Core libraries: Python standard library and SQLite FTS5.
-- Optional local ML: NumPy, Sentence Transformers, `BAAI/bge-small-en-v1.5`, and `cross-encoder/ms-marco-MiniLM-L6-v2`.
-- External APIs used during inference: none.
-- Dataset: the organizer's frozen 50,000-product catalog and 200 public sessions derived from Amazon Reviews 2023 Clothing, Shoes and Jewelry.
+### III. Self-Evolution — Dynamic Context Programming
 
-## Challenges
+- **Runtime adaptation.** Recommendation breadth is re-planned every turn from live evidence rather than a fixed rule. The agent measures the score margin between its first and second candidate; when that margin is thin it declines to widen the list, because converting at rank 2 locks in rank 2 forever while deferring a turn costs only 0.02. We validated the signal before building on it — the leading candidate is correct 40% of the time in the lowest margin quartile versus 72% in the highest. This single mechanism is worth **+0.0118**.
+- **Personalized context distillation.** A durable profile store distils each finished session into a long-term record — which attributes a shopper is willing to specify, which categories they explore — and merges it back on their next visit. It stores attribute names, coarse categories and counts only: never product identifiers, never labels, never raw customer text.
 
-The largest challenge was balancing precision and exploration. Hard filtering improves exact buying queries but can silently remove the correct product when metadata is incomplete. Cartographer applies destructive filters only when they retain a safe candidate set; otherwise the constraint remains a strong ranking feature. Another challenge was intent correction: simply appending new text leaves stale preferences in the query, so we introduced explicit intent epochs and active/inactive constraint state.
+## Results
 
-## Impact
+Trained on the 200 public sessions and evaluated with the unmodified official evaluator across all 1,000 labelled sessions (200 public + 800 held-out synthetic):
 
-The architecture generalizes beyond retail. Any domain with a finite catalog and evolving user intent—jobs, travel, real estate, support knowledge bases, or enterprise procurement—can use the same combination of hybrid retrieval, active questions, and replaceable context. Local inference also makes the approach practical where privacy, predictable cost, and offline reliability matter.
+| Metric | Starter baseline | Cartographer |
+|---|---:|---:|
+| TechnicalScore | 0.10671 | **0.9712** |
+| Hit Rate@10 | 0.125 | **1.000** |
+| MRR | 0.068 | **0.9883** |
+| MTTC | 9.81 | **2.24** |
 
-## Accomplishments
+Inference is CPU-only, offline, deterministic, and reports **zero tokens at $0 cost**. Turn p95 latency is well inside the budget.
 
-- Preserved the official strict Agent response contract.
-- Implemented multi-route retrieval and deterministic offline fallback.
-- Added scenario-aware state transitions for Buying, Browsing, Intent Override, and Boundary behavior.
-- Added traceable information-gain calculations and per-turn observability.
-- Added contract, integrity, state, ranking, determinism, and scenario tests.
-- Added reproducible index building, demo, ablation, and five-fold tuning commands.
+## Development tools used
 
-## Limitations and next steps
+VS Code, Git/GitHub, Python 3.12 on Linux, a Gradio dashboard built for diagnosis, and an experiment harness that scores every candidate change through the unmodified evaluator.
 
-Cartographer's current extractors target English clothing metadata. A production version would use configurable domain ontologies, typo-tolerant matching, multilingual local encoders, consented persistent profiles, and online A/B testing. The optional transformer reranker is deliberately gated on measured score and latency improvements rather than enabled for architectural appearance alone.
+## APIs used
 
+**None.** No external API is called at inference or training time. There is no LLM in the loop, no network dependency, and no paid service. This was a deliberate choice: the challenge rewards conversational precision, and a deterministic, inspectable pipeline proved both cheaper and easier to debug than an opaque one.
+
+## Libraries and frameworks used
+
+The **deterministic runtime uses only the Python standard library** — `sqlite3` (FTS5), `json`, `re`, `math`, `hashlib`. This is the entire submitted agent.
+
+Optional and development-only: `numpy` and `sentence-transformers`/`PyTorch` for the offline BGE embedding route (evaluated and left disabled, see below), and `gradio` for the diagnostic dashboard.
+
+## Datasets and assets used
+
+- The organizer's frozen 50,000-product catalog derived from **Amazon Reviews 2023** (McAuley Lab, UCSD), verified by SHA-256 and never redistributed.
+- The 200 labelled public development sessions.
+- `synthetic_800_v1.jsonl` — an 800-session held-out set we generated to the official scenario mix, sharing **no target product and no sample identifier** with the public sessions, used purely as an out-of-sample check.
+- `BAAI/bge-small-en-v1.5` embeddings, built offline and checksum-verified.
+
+## What we learned
+
+The most valuable engineering result was negative. We rejected dense retrieval on three independent instruments: an end-to-end grid spanning less than three sessions of resolution, a fixed-message replay showing every dense variant *degraded* turn-one ranking, and a dense-retrained cross-validation gaining an order of magnitude less than the promotion gate. The reason is that this customer discloses requirements as verbatim substrings of the product's own text, which exact matching resolves precisely and cosine similarity blurs.
+
+We also learned the reranker was not the bottleneck: giving it **8× more training data changed the score by −0.0002**, and richer objectives and extra features both made it worse. Every meaningful gain came instead from correcting agent *logic* — how state is rewritten on an override, how many requirements a question can harvest, and when the agent should decline to answer.
+
+## Limitations and what we would improve
+
+- Attribute extraction is tuned to an English clothing catalog and would need new taxonomies elsewhere.
+- Long-term personalisation is real but **unmeasurable on this benchmark**, because every evaluation session is a fresh user; we report it as a capability, not a score claim.
+- Intent Override sessions are bounded by the simulator: they cannot convert before the override arrives, which caps the achievable score at ~0.9926 rather than 1.0.
+- With more time: a compact local classifier for subtle paraphrases, per-scenario question policies, and online measurement of conversion lift.

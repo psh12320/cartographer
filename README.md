@@ -39,7 +39,10 @@ flowchart LR
 - Optional offline `BAAI/bge-small-en-v1.5` embeddings and MiniLM cross-encoder.
 - Optional route-specific linear reranker promoted only by out-of-fold score gains.
 - Entropy-based next-best-question selection with profile-aware attribute priors.
-- Precision-gated recommendation depth: a one-product shortlist on the first turn of an intent epoch, widening to the full ten as constraints accumulate, with a hard floor that restores full lists on later turns.
+- Precision-gated recommendation depth: a short, high-confidence shortlist on the early turns of an intent epoch, widening as constraints accumulate, with a hard floor that restores full lists on later turns.
+- Confidence-adaptive orchestration: recommendation breadth is re-planned each turn from the live rank-one-versus-rank-two score margin, so the agent declines to widen a list it is not confident in.
+- Over-generality cutoff: when the candidate union is too large to answer with a list, the agent returns a probe and spends the turn on a structured clarification prompt instead.
+- Optional long-term personalization: finished sessions are distilled into a durable per-shopper profile of attributes and categories, reloaded on their next visit.
 - Implicit negative feedback: products returned on an unsuccessful turn are not repeated.
 - Diagnostic traces kept outside the strict official response schema.
 
@@ -47,12 +50,29 @@ flowchart LR
 
 ```text
 cartographer/                 Runtime engine and development commands
+  engine.py                   Turn orchestration, depth gate, adaptive breadth
+  dialog.py                   Conversational state machine and intent override
+  retrieval.py                Hybrid candidate union and route-aware scoring
+  clarification.py            Expected-information-gain question selection
+  ranker.py                   Dependency-free learned residual reranker
+  profile_memory.py           Long-term personalized context distillation
+  dashboard.py                Local diagnostic and demonstration dashboard
 starter/agent.py              Official Agent entry point
 evaluator/local_evaluator.py  Organizer-provided deterministic evaluator
 tests/                        Contract, scenario, integrity, and unit tests
 docs/                         Competition rules and submission materials
 data/                         Public sessions and local catalog location
+synthetic_800_v1.jsonl        Held-out 800-session set used for generalization checks
 ```
+
+## The four challenge pillars
+
+| Pillar | Where it lives |
+|---|---|
+| **I. Intent routing and hybrid pipeline** | `dialog.py` route selection; `retrieval.py` constraint-first Buying track, diversified Browsing track, and the FTS5 + category + fingerprint + optional dense union |
+| **II. Multi-turn dialog strategy** | `dialog.py` incremental slots and intent-override rewriting; `clarification.py` information-gain questions; the over-generality cutoff in `engine.py` |
+| **III. Self-evolution** | Confidence-adaptive breadth in `engine.py`; long-term profile distillation in `profile_memory.py` |
+| **IV. Evaluation** | `evaluator/local_evaluator.py`, unmodified, plus the dashboard and experiment harness |
 
 ## Setup
 

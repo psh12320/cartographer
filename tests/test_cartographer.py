@@ -219,6 +219,7 @@ class CartographerTest(unittest.TestCase):
         config = self.config.with_overrides(
             recommendation_depth_schedule=(1, 2, 10),
             recommendation_depth_full_turn=4,
+            uncertain_margin_threshold=0.0,
         )
         engine = CartographerEngine(self.catalog_path, config)
         engine.reset("depth", {"preference_tags": []})
@@ -239,6 +240,7 @@ class CartographerTest(unittest.TestCase):
         config = self.config.with_overrides(
             recommendation_depth_schedule=(1, 2, 10),
             depth_gate_min_information_gain=1e9,
+            uncertain_margin_threshold=0.0,
         )
         engine = CartographerEngine(self.catalog_path, config)
         engine.reset("gate", {"preference_tags": []})
@@ -249,7 +251,9 @@ class CartographerTest(unittest.TestCase):
         self.assertEqual(trace["depth_gate_reason"], "no sufficiently informative question")
 
     def test_empty_depth_schedule_returns_full_lists(self) -> None:
-        config = self.config.with_overrides(recommendation_depth_schedule=())
+        config = self.config.with_overrides(
+            recommendation_depth_schedule=(), uncertain_margin_threshold=0.0
+        )
         engine = CartographerEngine(self.catalog_path, config)
         engine.reset("full", {"preference_tags": []})
         response = engine.respond("full", "I'm looking for Men Shirts.", 1, 10)
@@ -653,16 +657,92 @@ class CartographerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "checksum"):
             validate_manifest(samples, manifest, dataset)
 
-    def test_frozen_ranker_uses_only_locked_development_partition(self) -> None:
+    def test_over_generality_cutoff_truncates_a_broad_request(self) -> None:
+        config = self.config.with_overrides(
+            recommendation_depth_schedule=(),
+            overgenerality_candidate_threshold=2,
+            overgenerality_depth=1,
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("broad", {"preference_tags": []})
+        response = engine.respond("broad", "I'm looking for Men Shirts.", 1, 10)
+        self.assertEqual(len(response["recommendations"]), 1)
+        self.assertIn("over-generality", engine.get_trace("broad")[-1]["depth_gate_reason"])
+
+    def test_confidence_gate_narrows_when_the_top_margin_is_thin(self) -> None:
+        wide = self.config.with_overrides(
+            recommendation_depth_schedule=(), uncertain_margin_threshold=0.0
+        )
+        narrow = self.config.with_overrides(
+            recommendation_depth_schedule=(), uncertain_margin_threshold=1.01
+        )
+        for config, expected in ((wide, 5), (narrow, 1)):
+            engine = CartographerEngine(self.catalog_path, config)
+            engine.reset("margin", {"preference_tags": []})
+            response = engine.respond("margin", "I'm looking for Men Shirts.", 1, 10)
+            self.assertEqual(len(response["recommendations"]), expected)
+
+    def test_profile_memory_distils_and_recalls_across_sessions(self) -> None:
+        store = self.root / "profiles.json"
+        config = self.config.with_overrides(
+            enable_profile_memory=True, profile_memory_path=store
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        profile = {"preference_tags": ["fit"], "purchase_frequency": "3-4 prior purchases"}
+        engine.reset("visit-1", profile)
+        engine.respond("visit-1", "I'm looking for Men Shirts. A key requirement is: wool.", 1, 10)
+
+        # A second visit by the same shopper reloads what the first one revealed.
+        engine.reset("visit-1", profile)
+        remembered = engine.sessions["visit-1"].user_profile
+        self.assertEqual(remembered["remembered_sessions"], 1)
+        self.assertIn("fit", remembered["preference_tags"])
+        self.assertIn("material", remembered["preference_tags"])
+        self.assertTrue(store.exists())
+
+        # The record survives a fresh process and never stores product identity.
+        payload = json.loads(store.read_text(encoding="utf-8"))
+        self.assertEqual(payload["format_version"], 1)
+        serialized = json.dumps(payload)
+        for asin in ("A", "B", "C", "D", "E"):
+            self.assertNotIn(f'"{asin}"', serialized)
+
+    def test_profile_memory_is_off_by_default_and_survives_a_broken_store(self) -> None:
+        self.assertFalse(AgentConfig().enable_profile_memory)
+        broken = self.root / "broken.json"
+        broken.write_text("{not json", encoding="utf-8")
+        config = self.config.with_overrides(
+            enable_profile_memory=True, profile_memory_path=broken
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        engine.reset("session", {"preference_tags": ["fit"]})
+        response = engine.respond("session", "I'm looking for Men Shirts.", 1, 10)
+        self.assertTrue(response["recommendations"])
+        self.assertIsNotNone(engine.profile_memory.failure_reason)
+
+    def test_frozen_ranker_is_fitted_on_the_declared_public_partition(self) -> None:
+        """The shipped artifact must declare exactly the data it was fitted on.
+
+        Selection originally used only the locked 100-session development half so
+        the holdout stayed meaningful. Both public halves have since been
+        consumed, so the final model is fitted on all 200 labelled sessions and
+        generalisation is judged on the disjoint held-out synthetic set instead.
+        This test pins that declaration so the provenance can never drift
+        silently from what the documentation claims.
+        """
+
         repository = Path(__file__).resolve().parents[1]
         payload = json.loads(
             (repository / "cartographer" / "ranker_weights.json").read_text(encoding="utf-8")
         )
-        split = payload["training"]["data_split"]
-        self.assertEqual(payload["training"]["sample_count"], 100)
-        self.assertEqual(split["partition"], "development")
-        self.assertEqual(split["partition_sample_count"], 100)
+        training = payload["training"]
+        split = training["data_split"]
+        self.assertEqual(training["sample_count"], 200)
+        self.assertEqual(split["partition"], "all")
+        self.assertEqual(split["partition_sample_count"], 200)
         self.assertEqual(split["name"], "public-stratified-100-100-v1")
+        # Provenance must be self-describing: no labels, no product identity.
+        self.assertNotIn("parent_asin", json.dumps(payload["routes"]))
 
 
 if __name__ == "__main__":

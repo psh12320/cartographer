@@ -32,6 +32,8 @@ class SessionState:
     intent_epoch: int = 0
     asked_attributes: set[str] = field(default_factory=set)
     declined_attributes: set[str] = field(default_factory=set)
+    other_ask_count: int = 0
+    deflected_attributes: set[str] = field(default_factory=set)
     last_asked: str | None = None
     seen_products: set[str] = field(default_factory=set)
     override_shortlist: set[str] = field(default_factory=set)

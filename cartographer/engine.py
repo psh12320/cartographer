@@ -9,6 +9,7 @@ from .clarification import ClarificationDecision, ClarificationPolicy
 from .config import AgentConfig
 from .dialog import DialogManager
 from .models import SessionState, TraceEvent
+from .profile_memory import ProfileMemory
 from .retrieval import HybridRetriever, diversify_browsing
 
 
@@ -23,7 +24,7 @@ class CartographerEngine:
     ) -> None:
         self.config = (config or AgentConfig()).with_catalog(catalog_path)
         self.catalog = catalog_index or CatalogIndex(self.config.catalog_path, self.config.index_dir)
-        self.dialog = DialogManager()
+        self.dialog = DialogManager(self.config)
         self.retriever = HybridRetriever(self.catalog, self.config)
         self.clarification = ClarificationPolicy(
             self.catalog,
@@ -31,6 +32,12 @@ class CartographerEngine:
             other_start_turn=self.config.clarification_other_start_turn,
             other_multiplier=self.config.clarification_other_multiplier,
             other_routes=self.config.clarification_other_routes,
+            other_max_asks=self.config.clarification_other_max_asks,
+        )
+        self.profile_memory = (
+            ProfileMemory(self.config.profile_memory_path, self.config.profile_memory_max_tags)
+            if self.config.enable_profile_memory
+            else None
         )
         self.sessions: dict[str, SessionState] = {}
         self.traces: dict[str, list[TraceEvent]] = {}
@@ -42,6 +49,12 @@ class CartographerEngine:
         if session_id in self.sessions:
             self._session_order.remove(session_id)
         profile = dict(user_profile or {}) if self.config.enable_profile else {}
+        if self.profile_memory is not None:
+            previous = self.sessions.get(session_id)
+            if previous is not None:
+                self.profile_memory.distil(previous)
+                self.profile_memory.save()
+            profile = self.profile_memory.recall(profile)
         self.sessions[session_id] = SessionState(session_id=session_id, user_profile=profile)
         self.traces[session_id] = []
         self._session_order.append(session_id)
@@ -95,6 +108,32 @@ class CartographerEngine:
                 gate_reason = "no sufficiently informative question"
         elif schedule:
             gate_reason = "full-turn safety release"
+        overload = self.config.overgenerality_candidate_threshold
+        if (
+            overload > 0
+            and retrieval.candidate_count >= overload
+            and decision.attribute is not None
+            and turn < self.config.recommendation_depth_full_turn
+        ):
+            # Over-generality: the request still matches too much of the
+            # catalogue to answer with a list, so cut the recommendation back to
+            # a probe and spend the turn converging instead.
+            depth = min(depth, max(1, self.config.overgenerality_depth))
+            gate_reason = f"over-generality cutoff ({retrieval.candidate_count} candidates)"
+
+        threshold = self.config.uncertain_margin_threshold
+        if threshold > 0.0 and depth > 1 and len(retrieval.hits) >= 2:
+            # Adaptive orchestration: re-plan the output breadth from runtime
+            # evidence rather than the turn index alone. The spread is measured
+            # to the deepest product we would have shown, so a short candidate
+            # list is handled the same way as a full one.
+            scores = [hit.score for hit in retrieval.hits[: max(2, output_limit)]]
+            spread = scores[0] - scores[-1]
+            margin = (scores[0] - scores[1]) / spread if spread > 1e-9 else 1.0
+            if margin < threshold:
+                depth = 1
+                gate_reason = f"low confidence (margin {margin:.3f})"
+
         ranked_hits = retrieval.hits
         if state.route == "browsing" and self.config.diversify_browsing:
             ranked_hits = diversify_browsing(ranked_hits, self.catalog, depth)
@@ -103,6 +142,8 @@ class CartographerEngine:
         recommendations = [{"parent_asin": hit.parent_asin} for hit in ranked_hits[:depth]]
 
         if decision.attribute is not None:
+            if decision.attribute == "other":
+                state.other_ask_count += 1
             state.asked_attributes.add(decision.attribute)
             state.last_asked = decision.attribute
         else:

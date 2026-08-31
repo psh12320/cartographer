@@ -207,7 +207,9 @@ class HybridRetriever:
                 dense_weight = weights.dense * self.config.dense_browsing_multiplier
                 dense_rank_weight = weights.dense_rank * self.config.dense_browsing_multiplier
                 profile_weight = weights.profile * 1.20
-                popularity_weight = weights.popularity
+                popularity_weight = (
+                    weights.popularity * self.config.browsing_popularity_multiplier
+                )
             score = (
                 exact_weight * exact_count
                 + coverage_weight * constraint_score

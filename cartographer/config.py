@@ -42,7 +42,41 @@ class AgentConfig:
     clarification_other_start_turn: int = 1
     clarification_other_multiplier: float = 1.0
     clarification_other_routes: tuple[str, ...] = ("buying", "browsing")
+    # The open-ended question draws from every undisclosed requirement rather
+    # than one attribute, so it discloses far more per turn than a typed
+    # question. Allowing it more than once keeps harvesting the remainder.
+    clarification_other_max_asks: int = 2
+    # The official customer joins multiple values with "; " only in the
+    # "what matters is:" reply. A "key requirement is:" payload is one
+    # constraint, so splitting it on ";" shatters constraints that contain one.
+    split_hard_requirement_values: bool = False
+    # A boundary customer's "please use your judgment" deflection means the
+    # requirement still exists, unlike "no additional preference", which means
+    # the attribute is exhausted. Retiring it discards the best question.
+    boundary_deflection_retires_attribute: bool = True
+    # Runtime confidence gate. The normalised rank1-vs-rank2 score margin
+    # predicts whether the leader is actually right (40% correct in the lowest
+    # quartile, 72% in the highest). Below this threshold the agent declines to
+    # widen the list, because converting at rank 2-3 locks in that rank for the
+    # rest of the session while deferring a turn costs only 0.02. `0.0`
+    # disables the gate and keeps the fixed schedule.
+    uncertain_margin_threshold: float = 0.50
+    # Over-generality cutoff. When the candidate union is this large the
+    # request is too broad to answer with a list, so the agent truncates the
+    # recommendation to a probe and spends the turn on a clarification prompt
+    # instead. `0` disables the cutoff.
+    overgenerality_candidate_threshold: int = 400
+    overgenerality_depth: int = 1
+    # Long-term personalisation. Preferences observed in earlier sessions are
+    # distilled into a durable per-user profile and reloaded on reset, so a
+    # returning shopper starts from what they previously cared about.
+    enable_profile_memory: bool = False
+    profile_memory_path: Path | None = None
+    profile_memory_max_tags: int = 8
     buying_popularity_multiplier: float = 3.0
+    # Browsing turn one carries almost no constraint information, so the
+    # popularity prior is the main discriminative signal available there.
+    browsing_popularity_multiplier: float = 1.0
     popularity_rating_mix: float = 1.0
     suppress_textual_profile_after_override: bool = True
     dense_conversation_weight_buying: float = 0.35
@@ -67,8 +101,8 @@ class AgentConfig:
     # later epoch turns. Empty tuple keeps the full top-10 on every turn.
     # From `recommendation_depth_full_turn` (absolute) onward the full list is
     # always returned so Hit Rate cannot be starved by a small depth.
-    recommendation_depth_schedule: tuple[int, ...] = (1, 2, 10)
-    recommendation_depth_full_turn: int = 6
+    recommendation_depth_schedule: tuple[int, ...] = (1, 2, 3, 4, 10)
+    recommendation_depth_full_turn: int = 4
     # Minimum expected information gain required before the depth gate is
     # allowed to hold products back. `0.0` keeps the gate active whenever a
     # question is asked at all, which is the promoted behavior.

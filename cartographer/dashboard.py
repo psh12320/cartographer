@@ -1329,7 +1329,7 @@ class DashboardBackend:
                     process.kill()
 
 
-def build_dashboard(backend: DashboardBackend):
+def build_dashboard(backend: DashboardBackend, presentation: bool = False):
     try:
         import gradio as gr
     except ImportError as error:  # pragma: no cover - depends on optional UI package
@@ -1448,7 +1448,7 @@ def build_dashboard(backend: DashboardBackend):
                         label="Ablated recommendations",
                         elem_classes="diagnostic-table",
                     )
-            with gr.Tab("Complete paired inference JSON"):
+            with gr.Tab("Complete paired inference JSON", visible=not presentation):
                 with gr.Row():
                     full_inference = gr.JSON(label="Full-agent diagnostics")
                     ablated_inference = gr.JSON(label="Ablated diagnostics")
@@ -1475,7 +1475,7 @@ def build_dashboard(backend: DashboardBackend):
                 ],
                 concurrency_limit=1,
             )
-        with gr.Tab("All expected products"):
+        with gr.Tab("All expected products", visible=not presentation):
             gr.Markdown(
                 "Each row is one session in the selected scope. `Expected #1 ASIN` is the evaluator's target."
             )
@@ -1590,7 +1590,7 @@ The dashboard is diagnostic evidence, not the official response surface. Expecte
                 api_name="run_live_200",
             )
             stop_live.click(fn=None, cancels=[live_event])
-        with gr.Tab("How to decide"):
+        with gr.Tab("How to decide", visible=not presentation):
             gr.Markdown(
                 """
 ## Reading the evidence
@@ -1641,6 +1641,15 @@ def main() -> None:
     )
     parser.add_argument("--index-dir", default="data/cartographer_index")
     parser.add_argument(
+        "--presentation",
+        action="store_true",
+        help=(
+            "Hide developer-only diagnostic panels and show the three views that "
+            "demonstrate the system end to end: session replay, the live test, and "
+            "component value."
+        ),
+    )
+    parser.add_argument(
         "--ranker",
         default=None,
         help=(
@@ -1666,7 +1675,7 @@ def main() -> None:
     backend = DashboardBackend(
         args.catalog, args.dataset, args.index_dir, extra_datasets=extra, ranker_path=args.ranker
     )
-    demo = build_dashboard(backend)
+    demo = build_dashboard(backend, presentation=args.presentation)
     auth = None
     if args.auth:
         user, separator, password = args.auth.partition(":")
