@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "embedding_rows": 50000,
+  "embedding_dimensions": 384,
+  "embedding_dtype": "float32",
+  "normalized": true,
+  "catalog_sha256": "da979b05a68af864cb0dcf9ee6a81c010c7e66a57978ad286c7a2e005fc69a67",
+  "asin_order_sha256": "c3ada06571324aa1407d6dfacace45d9dfc472e481e8dd37a4097c3aa3c212bd",
+  "matrix_sha256": "0aa2f878121120cf52adf79ce48c16c38c650d552d91d0da686755cf7bb5df25"
+}
