@@ -1,10 +1,21 @@
-# Cartographer — Devpost Submission
+# Cartographer — Devpost submission copy
 
-**A shopping copilot that knows when *not* to answer.**
-
-Cartographer treats shopping dialogue as active search. Because the evaluator locks in a product's rank the moment it appears, recommending something you are unsure of is an irreversible commitment — so the agent withholds, asks the highest-value question, and converges at rank one instead.
+Paste the sections below into the Devpost **story** editor. Devpost supports headings,
+tables, images, code, lists, bold and italic, so this pastes as-is. Images use raw
+GitHub URLs, which render on Devpost; local paths would not. The tagline goes in the
+separate **elevator pitch** field, not the story.
 
 ---
+
+## Elevator pitch (separate Devpost field, 200 char max)
+
+> A shopping copilot that knows when *not* to answer. It withholds uncertain
+> recommendations and asks instead — reaching 0.973 on the official evaluator with
+> zero LLM tokens.
+
+---
+
+## Story — paste everything below this line
 
 ## Inspiration
 
@@ -25,14 +36,14 @@ Most distinctively, **it withholds.** When its top candidate isn't clearly ahead
 Results with the unmodified official evaluator across 1,000 labelled sessions:
 
 | Metric | Starter baseline | Cartographer |
-|---|---:|---:|
+| --- | --- | --- |
 | TechnicalScore | 0.10671 | **0.973062** |
 | MRR | 0.068 | **0.9959** |
 | Mean turns to conversion | 9.81 | **2.26** |
 
 Zero LLM tokens. Zero API cost. CPU-only, offline, deterministic.
 
-![Score journey](figures/01-score-journey.png)
+![Score journey from 0.107 to 0.973 against the structural ceiling](https://raw.githubusercontent.com/psh12320/cartographer/main/docs/figures/01-score-journey.png)
 
 ## How we built it
 
@@ -50,19 +61,19 @@ The rule we held to: **no change ships on reasoning alone.** Every promoted mech
 
 **A feature that scored exactly 0.000000.** Enabling long-term personalization changed the score by precisely zero — which was the tell. A feature that genuinely runs essentially never ties. It exposed two real bugs: distillation never fired because the evaluator allocates a fresh session ID per conversation, and shopper identity drifted because recall enriched the very profile the next distillation keyed on.
 
+![Every idea measured, including the ones that lost](https://raw.githubusercontent.com/psh12320/cartographer/main/docs/figures/03-experiment-ledger.png)
+
 ## Accomplishments that we're proud of
 
-![Confidence signal](figures/02-confidence-signal.png)
+**Withholding as a strategy.** Adaptive recommendation breadth — driven by the live score margin between the first and second candidate — was worth +0.0118, more than every model-tuning experiment combined. We validated the signal before trusting it, and ran an always-narrow control to prove the adaptivity was doing real work.
 
-**Withholding as a strategy.** Adaptive recommendation breadth — driven by the live score margin between the first and second candidate — was worth +0.0118, more than every model-tuning experiment combined. We validated the signal before trusting it (the leader is correct 40% of the time in the lowest margin quartile versus 72% in the highest) and ran an always-narrow control to prove the adaptivity was doing real work.
+![The agent can tell when it is about to be wrong](https://raw.githubusercontent.com/psh12320/cartographer/main/docs/figures/02-confidence-signal.png)
 
 **Knowing when to stop.** We proved the reranker was saturated rather than under-trained: 8× more training data moved the score by −0.0002, and in-sample and out-of-fold agree to 0.0002. That redirected effort away from model tuning toward agent logic, where the real gains were.
 
-![Experiment ledger](figures/03-experiment-ledger.png)
-
-![Per-scenario results](figures/04-per-scenario.png)
-
 **Honest numbers.** Hit Rate is 0.9990, not 1.0 — the confidence gate trades one session in a thousand for ranking. We documented the mechanism instead of rounding it away, and we publish the ceiling too: 0.9926 is the structural maximum here, because override sessions can't convert before their override arrives.
+
+![Reciprocal rank by conversation type, before and after](https://raw.githubusercontent.com/psh12320/cartographer/main/docs/figures/04-per-scenario.png)
 
 ## What we learned
 
@@ -84,25 +95,11 @@ The rule we held to: **no change ships on reasoning alone.** Every promoted mech
 
 **Real-world hardening.** Multilingual and typo-tolerant parsing, new taxonomies beyond English clothing, and online measurement of actual conversion lift rather than a simulated proxy.
 
----
+## Try it yourself
 
-## Figures
+```
+git clone https://github.com/psh12320/cartographer
+python3 -m cartographer.reproduce
+```
 
-All four charts are generated from measured results by `python3 docs/make_figures.py` — no illustrative numbers.
-
-| File | Shows |
-|---|---|
-| `figures/01-score-journey.png` | 0.107 → 0.973, milestone by milestone, against the structural ceiling |
-| `figures/02-confidence-signal.png` | Why the agent can tell when it is about to be wrong |
-| `figures/03-experiment-ledger.png` | Every change measured, gains and losses alike |
-| `figures/04-per-scenario.png` | Reciprocal rank by conversation type, before and after |
-
-## Built with
-
-`python` · `sqlite-fts5` · `numpy` · `pytorch` · `sentence-transformers` · `gradio`
-
-## Try it out
-
-- **Repository:** https://github.com/psh12320/cartographer
-- **Reproduce every number:** `python3 -m cartographer.reproduce`
-- **Run the dashboard:** `python3 -m cartographer.dashboard --presentation --inbrowser`
+Every figure and metric above regenerates from evaluator output — nothing is illustrative.
