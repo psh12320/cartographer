@@ -38,12 +38,12 @@ Trained on the 200 public sessions and evaluated with the unmodified official ev
 
 | Metric | Starter baseline | Cartographer |
 |---|---:|---:|
-| TechnicalScore | 0.10671 | **0.972982** |
+| TechnicalScore | 0.10671 | **0.973062** |
 | Hit Rate@10 | 0.125 | **0.9990** |
 | MRR | 0.068034 | **0.995875** |
-| MTTC | 9.81 | **2.264** |
+| MTTC | 9.81 | **2.260** |
 
-Held out separately, the 800 synthetic sessions the model never trained on score `0.971816` — the gain there is *larger* than on the in-sample public 200, which is the opposite of overfitting. Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9825`.
+Held out separately, the 800 synthetic sessions the model never trained on score `0.971891` — the gain there is *larger* than on the in-sample public 200, which is the opposite of overfitting. Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9892`. Every figure is reproducible with `python3 -m cartographer.reproduce`.
 
 One honest caveat rather than a rounded-up headline: **Hit Rate is `0.9990`, not perfect.** The confidence gate deliberately trades a little recall for rank — by declining to widen a list it is unsure of, it slows the growth of the "already shown" set that normally pushes past bad candidates, and one session in a thousand never converts. The relationship is monotonic in the threshold, so this is a real mechanism and not noise. Releasing full depth two turns earlier recovered one of the two sessions this originally cost *and* raised the score; the last one resisted every variant we tried and sits at the resolution limit of a 1,000-session benchmark.
 

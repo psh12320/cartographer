@@ -51,9 +51,12 @@ The submitted agent is fitted on all 200 labelled public sessions and evaluated 
 
 | Split | Sessions | TechnicalScore | Hit Rate@10 | MRR | MTTC |
 |---|---:|---:|---:|---:|---:|
-| All labelled sessions | 1000 | **`0.972982`** | `0.9990` | `0.995875` | `2.2640` |
-| Held-out synthetic only | 800 | `0.971816` | — | — | — |
+| All labelled sessions | 1000 | **`0.973062`** | `0.9990` | `0.995875` | `2.2600` |
+| Held-out synthetic only | 800 | `0.971891` | `0.9988` | `0.995469` | `2.3062` |
+| Public only (in-sample) | 200 | `0.977750` | `1.0000` | `0.997500` | `2.0750` |
 | Reference before this pass | 1000 | `0.959387` | `1.0000` | `0.939222` | `2.1190` |
+
+Every figure above is reproducible from a clean checkout with `python3 -m cartographer.reproduce`, which scores the shipped agent over all 1,000 labelled sessions using the unmodified official evaluator and reports the three splits separately. Selection-time measurements elsewhere in this document were taken with a freshly fitted artifact and can differ from the shipped one in the fifth decimal.
 
 Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9825`. The shipped artifact's grouped out-of-fold score on the 200 public sessions is `0.973050` with all five folds stable.
 

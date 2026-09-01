@@ -84,7 +84,7 @@ Python 3.10 or newer is required. The deterministic runtime uses only the Python
 4. Build the persistent lexical index:
 
 ```bash
-python -m cartographer.build_index
+python3 -m cartographer.build_index
 ```
 
 The agent automatically builds an in-memory FTS index if the cached index is absent, but the persistent index materially improves startup time.
@@ -94,8 +94,8 @@ The agent automatically builds an in-memory FTS index if the cached index is abs
 Install the declared local-model dependencies and precompute BGE embeddings:
 
 ```bash
-python -m pip install -r requirements.txt
-python -m cartographer.build_embeddings --device cuda --batch-size 128 --dtype float32
+python3 -m pip install -r requirements.txt
+python3 -m cartographer.build_embeddings --device cuda --batch-size 128 --dtype float32
 ```
 
 On a Windows NVIDIA laptop, the one-command path creates an isolated environment, installs CUDA PyTorch, downloads and verifies the frozen catalog when necessary, retries safe batch sizes, and verifies the completed artifact:
@@ -109,7 +109,7 @@ Use `-TorchIndexUrl` if the laptop requires a different CUDA wheel index selecte
 The setup command saves both document embeddings and a local copy of the query encoder under `data/cartographer_index/`, validates the frozen catalog checksum and ASIN row ordering, and allows inference without network access. See [docs/GPU_EMBEDDING_HANDOFF.md](docs/GPU_EMBEDDING_HANDOFF.md) for the cross-machine workflow. To cache the experimental cross-encoder as well:
 
 ```bash
-python -m cartographer.build_index --with-cross-encoder
+python3 -m cartographer.build_index --with-cross-encoder
 ```
 
 Both semantic extensions ship disabled, and that is a measured decision rather than unfinished work. The dense route was built, checksum-verified and evaluated on three independent instruments: a 26-configuration end-to-end grid spanning less than three sessions of resolution, a fixed-message replay in which every dense variant *degraded* turn-one ranking, and a dense-retrained cross-validation gaining an order of magnitude less than the promotion gate. The cause is that this customer discloses requirements as verbatim substrings of a product's own text, which exact matching resolves precisely and cosine similarity blurs. The cross-encoder was never promoted because dense never cleared its gate. Missing optional packages or model assets never prevent the deterministic agent from running.
@@ -123,42 +123,49 @@ After selecting the semantic configuration, [docs/LEARNED_RANKER.md](docs/LEARNE
 Run every test:
 
 ```bash
-python -m unittest discover -v
+python3 -m unittest discover -v
 ```
 
 Run the untouched official evaluator:
 
 ```bash
-python -m evaluator.local_evaluator --output results.json
+python3 -m evaluator.local_evaluator --output results.json
 ```
 
 Inspect a complete conversational trace:
 
 ```bash
-python -m cartographer.demo --sample-id public_0002
+python3 -m cartographer.demo --sample-id public_0002
 ```
 
 Launch the local evaluator observatory to inspect every target, replay the full agent beside a selected component ablation, explain every recommendation's dominant score signals, measure reranker/gate/retrieval/state/clarification value overall and by scenario, and start a fresh-process evaluation after any saved code update. A dataset-scope selector switches all panels between the public 200, an optional held-out set such as `synthetic_800_v1.jsonl`, and the two merged:
 
 ```bash
-python -m pip install -r requirements-dashboard.txt
-python -m cartographer.dashboard --inbrowser
+python3 -m pip install -r requirements-dashboard.txt
+python3 -m cartographer.dashboard --inbrowser
+```
+
+For a clean walkthrough — the view used in the demo video — hide the developer-only diagnostic panels:
+
+```bash
+python3 -m cartographer.dashboard --presentation --inbrowser
 ```
 
 See [docs/DASHBOARD.md](docs/DASHBOARD.md) for the panel guide and methodology warnings.
 
+`docs/public_split_v1.json` is a locked artifact: `python3 -m cartographer.data_split` regenerates it and deliberately refuses to overwrite a manifest that differs, so the split cannot drift silently. It is a verification command, not a setup step.
+
 Run component ablations or five-fold weight tuning:
 
 ```bash
-python -m cartographer.experiments --mode ablation --output ablation_results.json
-python -m cartographer.experiments --mode tune --output tuning_results.json
+python3 -m cartographer.experiments --mode ablation --output ablation_results.json
+python3 -m cartographer.experiments --mode tune --output tuning_results.json
 ```
 
 Reproduce the locked public split and development-only reranker:
 
 ```bash
-python -m cartographer.data_split
-python -m cartographer.train_ranker --split all --rrf-k 120 --routes buying,browsing,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75,browsing=0.75 --cross-validate --output cartographer/ranker_weights.json
+python3 -m cartographer.train_ranker --split all --rrf-k 120 --routes buying,browsing,boundary,override --route-scales buying=1.25,boundary=0.75,override=0.75,browsing=0.75 --cross-validate --output cartographer/ranker_weights.json
 ```
 
 The holdout comparison command is documented in [docs/LEARNED_RANKER.md](docs/LEARNED_RANKER.md). It is an audit command, not a tuning loop.
@@ -183,10 +190,17 @@ The submitted agent is fitted on all 200 labelled public sessions and scored wit
 
 | Split | Sessions | TechnicalScore | Hit Rate@10 | MRR | MTTC |
 |---|---:|---:|---:|---:|---:|
-| All labelled sessions | 1000 | **`0.972982`** | `0.9990` | `0.995875` | `2.2640` |
-| Held-out synthetic only | 800 | `0.971816` | — | — | — |
+| All labelled sessions | 1000 | **`0.973062`** | `0.9990` | `0.995875` | `2.2600` |
+| Held-out synthetic only | 800 | `0.971891` | `0.9988` | `0.995469` | `2.3062` |
+| Public only (in-sample) | 200 | `0.977750` | `1.0000` | `0.997500` | `2.0750` |
 
-The public 200 are in-sample under this protocol, so the synthetic 800 is the honest out-of-sample figure; the gain there is larger than on the in-sample half. Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9825`. The shipped artifact's grouped out-of-fold score on the 200 public sessions is `0.973050`, stable across all five folds.
+Reproduce every figure in that table with one command:
+
+```bash
+python3 -m cartographer.reproduce
+```
+
+The public 200 are in-sample under this protocol, so the synthetic 800 is the honest out-of-sample figure. Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9892`. The shipped artifact's grouped out-of-fold score on the 200 public sessions is `0.973050`, stable across all five folds.
 
 Hit Rate is `0.9990` rather than perfect, and that is a deliberate trade rather than a retrieval failure: the target is present in the candidate union on turn one in every session, but the confidence gate declines to widen a list it is unsure of, and one session in a thousand never converts as a result. `docs/RESULTS.md` records the mechanism, the rejected alternatives, and the full experiment ledger; `docs/NEXT_EXPERIMENTS.md` records the methodology.
 
