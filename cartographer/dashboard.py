@@ -1399,8 +1399,8 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                     label="What is on and off in each replay",
                 )
             with gr.Row():
-                target = gr.JSON(label="Expected #1 product and evaluator intent")
-                profile = gr.JSON(label="User profile supplied to Agent.reset")
+                target = gr.JSON(label="Expected #1 product and evaluator intent", visible=not presentation)
+                profile = gr.JSON(label="User profile supplied to Agent.reset", visible=not presentation)
             with gr.Row(equal_height=True):
                 with gr.Column():
                     full_summary = gr.Markdown()
@@ -1419,7 +1419,7 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                         allow_tags=False,
                     )
             replay_interpretation = gr.Markdown()
-            with gr.Tab("Full vs ablated turn state"):
+            with gr.Tab("Full vs ablated turn state", visible=not presentation):
                 with gr.Row():
                     full_turns = gr.Dataframe(
                         headers=TURN_HEADERS,
@@ -1431,7 +1431,7 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                         interactive=False,
                         label="Ablated agent: state, uncertainty, gate, and target position",
                     )
-            with gr.Tab("Full vs ablated ranked products"):
+            with gr.Tab("Full vs ablated ranked products", visible=not presentation):
                 gr.Markdown(
                     "The final column decomposes the largest additive score signals for a transparent recommendation explanation."
                 )
@@ -1515,7 +1515,8 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                 label="Per-session component effects",
             )
             report_evidence = gr.JSON(
-                label="Report-ready architecture, metric, cost, token, and limitation evidence"
+                label="Report-ready architecture, metric, cost, token, and limitation evidence",
+                visible=not presentation,
             )
             compare.click(
                 fn=backend.compare_components,
@@ -1523,7 +1524,7 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                 outputs=[comparison_summary, comparison, session_comparison, report_evidence],
                 concurrency_limit=1,
             )
-        with gr.Tab("Report & video evidence"):
+        with gr.Tab("Report & video evidence", visible=not presentation):
             gr.Markdown(
                 """
 ## Deliverable map
@@ -1562,8 +1563,8 @@ The dashboard is diagnostic evidence, not the official response surface. Expecte
                 stop_live = gr.Button("Cancel running test", variant="stop")
             live_status = gr.Markdown("No live evaluation is running.")
             with gr.Row():
-                live_overall = gr.JSON(label="Rolling overall metrics")
-                live_metadata = gr.JSON(label="Exact source and Git metadata")
+                live_overall = gr.JSON(label="Live TechnicalScore, Hit Rate, MRR and MTTC")
+                live_metadata = gr.JSON(label="Exact source and Git metadata", visible=not presentation)
             live_scenarios = gr.Dataframe(
                 headers=LIVE_SCENARIO_HEADERS,
                 interactive=False,
