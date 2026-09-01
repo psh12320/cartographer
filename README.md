@@ -151,6 +151,12 @@ For a clean walkthrough — the view used in the demo video — hide the develop
 python3 -m cartographer.dashboard --presentation --inbrowser
 ```
 
+To demonstrate long-term personalization, give it a store. Each replayed conversation is distilled into a durable shopper profile, and the replay tab shows what the agent has learned about that shopper across visits:
+
+```bash
+python3 -m cartographer.dashboard --presentation --profile-memory data/cartographer_index/profiles.json
+```
+
 See [docs/DASHBOARD.md](docs/DASHBOARD.md) for the panel guide and methodology warnings.
 
 `docs/public_split_v1.json` is a locked artifact: `python3 -m cartographer.data_split` regenerates it and deliberately refuses to overwrite a manifest that differs, so the split cannot drift silently. It is a verification command, not a setup step.

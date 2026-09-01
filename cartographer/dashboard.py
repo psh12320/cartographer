@@ -373,8 +373,12 @@ class DashboardBackend:
         index_dir: str | Path = "data/cartographer_index",
         extra_datasets: Sequence[str | Path] = (),
         ranker_path: str | Path | None = None,
+        profile_memory_path: str | Path | None = None,
     ) -> None:
         self.catalog_path = str(catalog_path)
+        # Long-term personalisation is opt-in. When a store is supplied the
+        # replay runs with it enabled so the distilled profile can be shown.
+        self.profile_memory_path = Path(profile_memory_path) if profile_memory_path else None
         # An alternate artifact can be shown without replacing the promoted one,
         # which stays bound to the locked development partition.
         self.ranker_path = Path(ranker_path) if ranker_path else None
@@ -447,6 +451,52 @@ class DashboardBackend:
             for sample in scope["samples"]:
                 handle.write(json.dumps(sample) + "\n")
         return str(target)
+
+    def profile_memory_view(self, sample_id: str) -> str:
+        """Show what the agent remembers about this shopper from earlier visits."""
+
+        if not self.profile_memory_path:
+            return (
+                "**Long-term personalization is off.** Start the dashboard with "
+                "`--profile-memory <path>` to distil each replayed session into a "
+                "durable shopper profile and reload it on the next visit."
+            )
+        from .profile_memory import ProfileMemory, user_key
+
+        sample = self.samples_by_id.get(str(sample_id))
+        if sample is None:
+            return "**Long-term personalization is on.** Select a session to see its shopper."
+        memory = ProfileMemory(self.profile_memory_path)
+        record = memory.records.get(user_key(sample.get("user_profile") or {}))
+        if not record:
+            return (
+                "**Long-term personalization is on.** No prior visits recorded for this "
+                "shopper yet — replay a session to distil one."
+            )
+        attributes = sorted(
+            dict(record.get("attribute_counts") or {}).items(), key=lambda item: -item[1]
+        )
+        categories = sorted(
+            dict(record.get("categories") or {}).items(), key=lambda item: -item[1]
+        )[:3]
+        lines = [
+            f"**Long-term personalization is on.** Distilled from "
+            f"**{record.get('sessions', 0)} earlier session(s)** by this shopper.",
+            "",
+            "| Remembered signal | Evidence |",
+            "|---|---|",
+        ]
+        for name, count in attributes[:5]:
+            lines.append(f"| specifies `{name}` | seen {count}× |")
+        for name, count in categories:
+            lines.append(f"| explores *{name}* | seen {count}× |")
+        lines.append("")
+        lines.append(
+            "These are folded into the profile on the next `Agent.reset`, so a returning "
+            "shopper starts from what they previously cared about. Only attribute names, "
+            "coarse categories and counts are stored — never products, labels or raw text."
+        )
+        return "\n".join(lines)
 
     def ranker_banner(self) -> str:
         """State which reranker artifact this dashboard session is showing."""
@@ -541,6 +591,11 @@ class DashboardBackend:
             ),
             enable_cross_encoder=False,
             **({"ranker_path": self.ranker_path} if self.ranker_path else {}),
+            **(
+                {"enable_profile_memory": True, "profile_memory_path": self.profile_memory_path}
+                if self.profile_memory_path
+                else {}
+            ),
         )
 
     def replay(
@@ -805,6 +860,11 @@ class DashboardBackend:
         decision_markdown = "## What this replay suggests\n\n" + "\n".join(
             f"- {signal}" for signal in signals
         )
+        # The replay owns the whole conversation, so it can tell the agent the
+        # session has ended; distillation is otherwise lazy and the last
+        # conversation of a process would never be recorded.
+        agent.engine.flush_profile_memory()
+
         return (
             summary,
             chat,
@@ -1419,6 +1479,10 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                         allow_tags=False,
                     )
             replay_interpretation = gr.Markdown()
+            gr.Markdown("### Long-term memory of this shopper")
+            profile_memory_view = gr.Markdown(backend.profile_memory_view(
+                backend.samples[0]["sample_id"]
+            ))
             with gr.Tab("Full vs ablated turn state", visible=not presentation):
                 with gr.Row():
                     full_turns = gr.Dataframe(
@@ -1452,6 +1516,16 @@ def build_dashboard(backend: DashboardBackend, presentation: bool = False):
                 with gr.Row():
                     full_inference = gr.JSON(label="Full-agent diagnostics")
                     ablated_inference = gr.JSON(label="Ablated diagnostics")
+            session.change(
+                fn=backend.profile_memory_view,
+                inputs=[session],
+                outputs=[profile_memory_view],
+            )
+            run.click(
+                fn=backend.profile_memory_view,
+                inputs=[session],
+                outputs=[profile_memory_view],
+            )
             run.click(
                 fn=backend.compare_session_components,
                 inputs=[session, session_components, session_dense],
@@ -1651,6 +1725,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--profile-memory",
+        default=None,
+        help=(
+            "Enable long-term personalization and store distilled shopper profiles at "
+            "this path, so replays demonstrate Personalized Context Distillation."
+        ),
+    )
+    parser.add_argument(
         "--ranker",
         default=None,
         help=(
@@ -1674,7 +1756,8 @@ def main() -> None:
     args = parser.parse_args()
     extra = DEFAULT_EXTRA_DATASETS if args.extra_dataset is None else tuple(args.extra_dataset)
     backend = DashboardBackend(
-        args.catalog, args.dataset, args.index_dir, extra_datasets=extra, ranker_path=args.ranker
+        args.catalog, args.dataset, args.index_dir, extra_datasets=extra, ranker_path=args.ranker,
+        profile_memory_path=args.profile_memory,
     )
     demo = build_dashboard(backend, presentation=args.presentation)
     auth = None

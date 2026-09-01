@@ -203,5 +203,28 @@ class CartographerEngine:
             "usage": {"prompt_tokens": 0, "completion_tokens": 0},
         }
 
+    def flush_profile_memory(self) -> int:
+        """Distil every conversation still held in memory and persist.
+
+        Distillation is otherwise lazy -- a session is folded in when the next
+        one starts -- so without this the final conversation of a process is
+        never recorded. Callers that know a conversation has ended (a UI, a
+        batch run, a shutdown hook) should call this.
+        """
+
+        if self.profile_memory is None:
+            return 0
+        pending = [
+            identifier
+            for identifier in self._session_order
+            if identifier not in self._distilled and identifier in self.sessions
+        ]
+        for identifier in pending:
+            self.profile_memory.distil(self.sessions[identifier])
+            self._distilled.add(identifier)
+        if pending:
+            self.profile_memory.save()
+        return len(pending)
+
     def get_trace(self, session_id: str) -> list[dict]:
         return [asdict(event) for event in self.traces.get(session_id, [])]
