@@ -215,4 +215,19 @@ The frozen competition catalog is derived from Amazon Reviews 2023 by McAuley La
 
 ## Team contributions
 
-The implementation includes system design, retrieval and dialogue engineering, evaluation tooling, tests, documentation, and demo preparation. Replace this paragraph with member names and their specific contributions before the final Devpost submission.
+**Nicholas Chang Chia Kuan — Retrieval and catalog indexing.**
+Built the hybrid candidate union in `retrieval.py`: the SQLite FTS5/BM25 lexical route, the popularity-ordered category prior, and the exact intent-fingerprint route, together with the route-aware scoring that fuses them. Implemented the constraint-first Buying track, including the destructive hard filter with its safety floor and escape hatch, and the Browsing diversification path. Owns `catalog.py` and the persistent index build.
+
+**Phuc Hong Pham — Conversational state machine.**
+Built the dynamic context compiler in `dialog.py` and the session model in `models.py`: typed constraints carrying strength, source turn, active flag and intent epoch; incremental slot accumulation; category and route detection. Owns intent-override handling, including the correction that supersedes only the replaced preference while retaining everything else the shopper disclosed — worth `+0.0043` on held-out data.
+
+**Jiajun Bian — Clarification and dialogue policy.**
+Built the expected-information-gain question selection in `clarification.py`, including the candidate-entropy model, attribute coverage shaping and profile-aware priors. Owns the open-ended question policy, the over-generality cutoff that trades a recommendation for a clarification when the candidate pool is too broad, and the measurement work establishing which questions the simulated customer can actually answer.
+
+**Guru Kiran Jaisankar — Learned ranking and personalization.**
+Built the dependency-free residual reranker in `ranker.py` and its training pipeline in `train_ranker.py`, including session-grouped cross-validation and the promotion gates. Ran the objective, feature and capacity studies that established the model was saturated, and the three-instrument evaluation that rejected dense retrieval. Owns `profile_memory.py` and long-term context distillation.
+
+**P Shricharan — Orchestration, evaluation and delivery.**
+Built the turn orchestration in `engine.py`, including the precision-gated recommendation depth and the confidence-adaptive breadth gate that re-plans output width from the live score margin — the single largest scoring mechanism at `+0.0118`. Owns the evaluation harness, the diagnostic dashboard, the held-out synthetic set used for generalization checks, and the test suite, documentation and submission materials.
+
+All five members participated in experiment design and review. Every promoted change was selected end to end through the unmodified official evaluator, and the full ledger — including rejected changes and their measured costs — is recorded in [docs/RESULTS.md](docs/RESULTS.md) and [docs/NEXT_EXPERIMENTS.md](docs/NEXT_EXPERIMENTS.md).
