@@ -15,6 +15,16 @@ separate **elevator pitch** field, not the story.
 
 ---
 
+## Demo video (separate Devpost field)
+
+Paste this into the Devpost **video** field, which expects a bare YouTube URL:
+
+```
+https://youtu.be/L7bS9c1myqk
+```
+
+---
+
 ## Story (paste everything below this line)
 
 ## Inspiration
@@ -129,6 +139,8 @@ Everything else is optional or development-only. `numpy`, `PyTorch` (CPU) and `s
 **Real-world hardening.** Multilingual and typo-tolerant parsing, new taxonomies beyond English clothing, and online measurement of actual conversion lift rather than a simulated proxy.
 
 ## Try it yourself
+
+**Demo video:** [Cartographer end to end](https://youtu.be/L7bS9c1myqk)
 
 ```
 git clone https://github.com/psh12320/cartographer

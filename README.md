@@ -2,6 +2,8 @@
 
 **Entropy-guided conversational product search for the TechJam 2026 Shopping Copilot challenge.**
 
+**Demo video:** [Cartographer end to end](https://youtu.be/L7bS9c1myqk)
+
 Cartographer treats shopping dialogue as active search. On every turn it ranks the best products it can identify *and* asks the question expected to remove the most uncertainty. It runs locally on CPU, uses no paid API, reports zero LLM tokens, and preserves the organizer's required `Agent` interface.
 
 ## Why this approach
