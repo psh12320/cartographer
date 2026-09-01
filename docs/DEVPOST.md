@@ -53,6 +53,39 @@ We built an experiment harness that scores every candidate change end-to-end thr
 
 The rule we held to: **no change ships on reasoning alone.** Every promoted mechanism was measured, and the rejected ones are documented with their costs.
 
+## How our solution addresses the problem statement
+
+The brief asks for four pillars, and each maps to a specific part of the agent:
+
+**I. Intent routing and hybrid pipeline.** Dual-track routing sends every message to a high-precision Buying filter that locks hard constraints, or a diversified Browsing track for open-ended exploration. Candidates come from four in-memory routes, keyword (SQLite FTS5/BM25), category prior, exact intent fingerprints, and an optional dense vector route, fused by route-aware scoring and reordered by a learned residual ranker.
+
+**II. Multi-turn dialog strategy.** A state machine accumulates incremental slots and rewrites them on abrupt intent override, retiring only the superseded preference. When the candidate pool is too broad to answer with a list, an over-generality cutoff returns a probe and spends the turn on a structured clarification prompt.
+
+**III. Self-evolution through dynamic context programming.** Recommendation breadth is re-planned every turn from live evidence rather than a fixed rule, and finished sessions are distilled into durable long-term shopper profiles that reload on the next visit.
+
+**IV. Evaluation.** Every claim is measured with the organizer's evaluator, unmodified, across 1,000 labelled sessions.
+
+## Development tools used
+
+VS Code, Git and GitHub, Python 3.12 on Linux, a purpose-built Gradio dashboard for replaying individual conversations turn by turn, a custom experiment harness that scores every candidate change end to end through the untouched evaluator, and matplotlib for the figures above.
+
+## APIs used
+
+**None.** No external API is called during training or inference. There is no LLM in the loop, no network dependency at runtime, and no paid service. This was deliberate: a deterministic, inspectable pipeline proved both cheaper and far easier to debug than an opaque one, and it reports zero tokens at zero cost.
+
+## Libraries and frameworks used
+
+The **submitted agent uses only the Python standard library**: `sqlite3` for FTS5 keyword retrieval, plus `json`, `re`, `math` and `hashlib`. That is the entire runtime dependency list.
+
+Everything else is optional or development-only. `numpy`, `PyTorch` (CPU) and `sentence-transformers` support the offline BGE embedding route, which we evaluated and left disabled. `gradio` powers the diagnostic dashboard and `matplotlib` generates the figures. None of them are imported by the scored agent.
+
+## Datasets and assets used
+
+- The organizer's frozen **50,000-product catalog** derived from **Amazon Reviews 2023** (McAuley Lab, UCSD), verified by SHA-256 and never redistributed.
+- The **200 labelled public sessions** provided with the participant kit.
+- **`synthetic_800_v1.jsonl`**, an 800-session held-out set we generated to the official scenario mix. It shares no target product and no sample identifier with the public sessions, so it serves as a genuine out-of-sample check.
+- **`BAAI/bge-small-en-v1.5`** sentence embeddings, built offline and checksum-verified, used for the dense retrieval experiment we ultimately rejected.
+
 ## Challenges we ran into
 
 **Our best ideas kept losing.** A listwise loss that should have matched the objective lost 0.004. Adding five well-motivated features lost 0.003. Suppressing a question we'd proven was 21% unanswerable lost 0.001. Each was sound on paper and wrong in measurement.
