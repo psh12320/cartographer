@@ -89,24 +89,35 @@ python3 -m cartographer.build_index
 
 The agent automatically builds an in-memory FTS index if the cached index is absent, but the persistent index materially improves startup time.
 
-### Optional semantic routes
+### Optional semantic routes (not required)
 
-Install the declared local-model dependencies and precompute BGE embeddings:
+**You do not need embeddings to reproduce any result in this README.** Dense retrieval ships disabled, so the scored agent never loads them and `python3 -m cartographer.reproduce` runs without them. Build them only if you want to re-run the dense evaluation yourself.
+
+They are not committed: the matrix is 76.8 MB and the encoder another 129 MB, which would burden every clone for an artifact that is deterministic to regenerate. What *is* committed is `data/cartographer_index/embeddings_manifest.json`, which pins the row count, dimensions, catalog SHA-256, ASIN-order SHA-256 and matrix SHA-256 — so a rebuild can be checked against ours exactly.
 
 ```bash
 python3 -m pip install -r requirements.txt
+
+# CPU: no GPU required. About 90 minutes on two cores.
+python3 -m cartographer.build_embeddings --device cpu --batch-size 32 --dtype float32
+
+# CUDA, if available: a few minutes.
 python3 -m cartographer.build_embeddings --device cuda --batch-size 128 --dtype float32
 ```
 
-On a Windows NVIDIA laptop, the one-command path creates an isolated environment, installs CUDA PyTorch, downloads and verifies the frozen catalog when necessary, retries safe batch sizes, and verifies the completed artifact:
+The command downloads `BAAI/bge-small-en-v1.5`, saves both the 50,000-row matrix and a local copy of the encoder under `data/cartographer_index/`, verifies the frozen catalog checksum and ASIN row ordering, and leaves the agent able to run offline afterwards. Verify an existing artifact without rebuilding:
+
+```bash
+python3 -m cartographer.build_embeddings --verify-only
+```
+
+Builds are reproducible across hardware. A CUDA build and a CPU build of the same catalog agreed to a per-row cosine of `1.000000` with a maximum elementwise difference of `6.9e-07`, and the encoder weights were byte-identical; only the byte-level matrix checksum differs, so treat `matrix_sha256` as specific to the bundle you built. On a Windows NVIDIA laptop the scripted path creates an isolated environment, installs CUDA PyTorch, fetches and verifies the catalog if needed, and retries safe batch sizes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\generate_embeddings_gpu.ps1 -CreateArchive
 ```
 
-Use `-TorchIndexUrl` if the laptop requires a different CUDA wheel index selected from the official PyTorch installer. Generated matrices, model files, and the optional transfer ZIP remain ignored by Git.
-
-The setup command saves both document embeddings and a local copy of the query encoder under `data/cartographer_index/`, validates the frozen catalog checksum and ASIN row ordering, and allows inference without network access. See [docs/GPU_EMBEDDING_HANDOFF.md](docs/GPU_EMBEDDING_HANDOFF.md) for the cross-machine workflow. To cache the experimental cross-encoder as well:
+Use `-TorchIndexUrl` for a different CUDA wheel index. Generated matrices, model files and the transfer ZIP stay ignored by Git. See [docs/GPU_EMBEDDING_HANDOFF.md](docs/GPU_EMBEDDING_HANDOFF.md) for the cross-machine workflow, and [docs/SEMANTIC_PROMOTION.md](docs/SEMANTIC_PROMOTION.md) for the gates a semantic route must clear. To cache the experimental cross-encoder as well:
 
 ```bash
 python3 -m cartographer.build_index --with-cross-encoder
