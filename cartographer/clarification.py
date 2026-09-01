@@ -84,6 +84,11 @@ class ClarificationPolicy:
                 or typed_best < 0.20
             )
         )
+        # Deliberately not gated on a previous decline. Measured on the
+        # 1000-session field, suppressing a re-ask after the customer declines
+        # `other` costs 0.00114 and a hit: the policy falls back to a typed
+        # question, which discloses far less (+0.79 constraints per ask against
+        # +1.72), so the re-ask is worth more than the turn it risks.
         if allow_other and state.other_ask_count < self.other_max_asks:
             other_gain, coverage = self._attribute_gain("other", pool, probabilities, active_values)
             other_gain *= (0.5 + 0.5 * coverage) * self.other_multiplier

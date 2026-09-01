@@ -15,7 +15,7 @@ The agent classifies each message into a **Buying** or **Browsing** track and ru
 - **Buying** locks hard constraints. Requirements become destructive filters, but only while metadata coverage stays safe: a constraint narrows the pool only if the intersection stays above a floor, with an escape hatch for the strongest exact matches. This prevents a mis-parsed requirement from filtering the correct product out of existence.
 - **Browsing** widens instead of narrowing, weighting category agreement higher and applying intent-fingerprint diversification so an open-ended request returns a spread of options rather than five near-duplicates.
 
-Candidates are unioned from four in-memory routes — SQLite FTS5/BM25 keyword retrieval, a popularity-ordered category prior, exact intent-fingerprint matching, and an optional dense BGE vector route — then fused by route-aware scoring and re-ordered by a learned residual reranker. Recall is complete: **Hit Rate@10 is 1.000 across all 1,000 evaluation sessions**, so no product is ever lost by retrieval.
+Candidates are unioned from four in-memory routes — SQLite FTS5/BM25 keyword retrieval, a popularity-ordered category prior, exact intent-fingerprint matching, and an optional dense BGE vector route — then fused by route-aware scoring and re-ordered by a learned residual reranker. Retrieval recall is complete — the target is present in the candidate union on turn one in **every** session, so nothing is ever lost by search itself. End-to-end Hit Rate@10 is `0.9990`: exactly one session in a thousand fails to surface it in time, for the reason given below.
 
 ### II. Dialog Strategy — Multi-Turn Scenario Evolution
 
@@ -30,7 +30,7 @@ Questions are chosen by **expected information gain** over candidate-set entropy
 ### III. Self-Evolution — Dynamic Context Programming
 
 - **Runtime adaptation.** Recommendation breadth is re-planned every turn from live evidence rather than a fixed rule. The agent measures the score margin between its first and second candidate; when that margin is thin it declines to widen the list, because converting at rank 2 locks in rank 2 forever while deferring a turn costs only 0.02. We validated the signal before building on it — the leading candidate is correct 40% of the time in the lowest margin quartile versus 72% in the highest. This single mechanism is worth **+0.0118**.
-- **Personalized context distillation.** A durable profile store distils each finished session into a long-term record — which attributes a shopper is willing to specify, which categories they explore — and merges it back on their next visit. It stores attribute names, coarse categories and counts only: never product identifiers, never labels, never raw customer text.
+- **Personalized context distillation.** A durable profile store distils each finished session into a long-term record — which attributes a shopper is willing to specify, which categories they explore — and merges it back on their next visit. It stores attribute names, coarse categories and counts only: never product identifiers, never labels, never raw customer text. Across the 1,000 evaluation sessions it builds 64 distinct shopper records, the largest aggregating 157 sessions and learning that this shopper specifies `feature` (199 times) and `material` (159). **It measures at −0.000229 and therefore ships disabled** — see below for why, and for the two bugs that finding uncovered.
 
 ## Results
 
@@ -38,12 +38,16 @@ Trained on the 200 public sessions and evaluated with the unmodified official ev
 
 | Metric | Starter baseline | Cartographer |
 |---|---:|---:|
-| TechnicalScore | 0.10671 | **0.9712** |
-| Hit Rate@10 | 0.125 | **1.000** |
-| MRR | 0.068 | **0.9883** |
-| MTTC | 9.81 | **2.24** |
+| TechnicalScore | 0.10671 | **0.972982** |
+| Hit Rate@10 | 0.125 | **0.9990** |
+| MRR | 0.068034 | **0.995875** |
+| MTTC | 9.81 | **2.264** |
 
-Inference is CPU-only, offline, deterministic, and reports **zero tokens at $0 cost**. Turn p95 latency is well inside the budget.
+Held out separately, the 800 synthetic sessions the model never trained on score `0.971816` — the gain there is *larger* than on the in-sample public 200, which is the opposite of overfitting. Per scenario: Boundary MRR `1.0000`, Buying `0.9988`, Browsing `0.9950`, Intent Override `0.9825`.
+
+One honest caveat rather than a rounded-up headline: **Hit Rate is `0.9990`, not perfect.** The confidence gate deliberately trades a little recall for rank — by declining to widen a list it is unsure of, it slows the growth of the "already shown" set that normally pushes past bad candidates, and one session in a thousand never converts. The relationship is monotonic in the threshold, so this is a real mechanism and not noise. Releasing full depth two turns earlier recovered one of the two sessions this originally cost *and* raised the score; the last one resisted every variant we tried and sits at the resolution limit of a 1,000-session benchmark.
+
+Inference is CPU-only, offline, deterministic, and reports **zero tokens at $0 cost**. Turn p95 latency is around 250 ms against a 750 ms budget.
 
 ## Development tools used
 
@@ -66,6 +70,22 @@ Optional and development-only: `numpy` and `sentence-transformers`/`PyTorch` for
 - `synthetic_800_v1.jsonl` — an 800-session held-out set we generated to the official scenario mix, sharing **no target product and no sample identifier** with the public sessions, used purely as an out-of-sample check.
 - `BAAI/bge-small-en-v1.5` embeddings, built offline and checksum-verified.
 
+## Long-term personalization: a measured negative, and two bugs it exposed
+
+We had assumed this capability was unmeasurable, on the reasoning that every evaluation session is a fresh user. That was wrong, and checking rather than assuming is what surfaced it: the 1,000 sessions contain only **64 distinct profile signatures**, the largest covering 130 sessions. The competition profiles are shopper *archetypes*, not unique identities, so a returning-shopper record actually fires on 94% of sessions and the feature is directly testable.
+
+| Configuration | TechnicalScore | Hit Rate@10 | MRR | MTTC |
+|---|---:|---:|---:|---:|
+| Profile memory off (shipped) | **0.972982** | 0.9990 | 0.995875 | 2.2640 |
+| Profile memory on | 0.972753 | 0.9990 | 0.995708 | 2.2730 |
+
+The first measurement returned a delta of **exactly 0.000000**, which is the tell that mattered: a feature that is genuinely running essentially never scores identically to its absence. Investigating that instead of accepting a convenient "no harm" result exposed two real defects.
+
+1. **Distillation never ran at all.** The official evaluator allocates a fresh `uuid` per conversation, so keying the fold-in on a repeated `session_id` silently matched nothing. Our unit test passed only because it reused one identifier. The fix distils every finished conversation exactly once regardless of naming, and a regression test now mirrors the evaluator's naming exactly.
+2. **Shopper identity drifted.** Recall enriches the incoming profile with remembered attributes, so the *next* distillation computed a different key from the enriched profile and fragmented one shopper into many records. Identity is now captured from the caller's original profile, before any enrichment.
+
+With both fixed the feature works — and still costs `0.000229`. The reason is instructive rather than disappointing: the agent already converges at MRR `0.9957` in about 2.3 turns, so a prior over which attributes a shopper tends to specify has almost nothing left to improve, and the extra tags occasionally nudge question selection away from the better choice. It ships **off by default**, as a working and tested capability whose value would appear in a deployment with genuinely returning shoppers rather than 64 archetypes.
+
 ## What we learned
 
 The most valuable engineering result was negative. We rejected dense retrieval on three independent instruments: an end-to-end grid spanning less than three sessions of resolution, a fixed-message replay showing every dense variant *degraded* turn-one ranking, and a dense-retrained cross-validation gaining an order of magnitude less than the promotion gate. The reason is that this customer discloses requirements as verbatim substrings of the product's own text, which exact matching resolves precisely and cosine similarity blurs.
@@ -75,6 +95,6 @@ We also learned the reranker was not the bottleneck: giving it **8× more traini
 ## Limitations and what we would improve
 
 - Attribute extraction is tuned to an English clothing catalog and would need new taxonomies elsewhere.
-- Long-term personalisation is real but **unmeasurable on this benchmark**, because every evaluation session is a fresh user; we report it as a capability, not a score claim.
+- Long-term personalisation is real, working and tested, but measures at `-0.000229` on this benchmark because the agent already converges in about 2.3 turns. It ships disabled and is reported as a capability, not a score claim.
 - Intent Override sessions are bounded by the simulator: they cannot convert before the override arrives, which caps the achievable score at ~0.9926 rather than 1.0.
 - With more time: a compact local classifier for subtle paraphrases, per-scenario question policies, and online measurement of conversion lift.

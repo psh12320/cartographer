@@ -91,7 +91,7 @@ class ProfileMemory:
     def distil(self, state: SessionState) -> dict[str, Any]:
         """Fold one finished session's evidence into the long-term record."""
 
-        key = user_key(state.user_profile)
+        key = state.profile_key or user_key(state.user_profile)
         record = self.records.setdefault(
             key, {"sessions": 0, "attribute_counts": {}, "categories": {}}
         )

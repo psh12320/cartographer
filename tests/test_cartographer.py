@@ -707,6 +707,33 @@ class CartographerTest(unittest.TestCase):
         for asin in ("A", "B", "C", "D", "E"):
             self.assertNotIn(f'"{asin}"', serialized)
 
+    def test_profile_memory_distils_across_distinct_session_identifiers(self) -> None:
+        """The official evaluator allocates a fresh identifier per conversation.
+
+        Keying distillation on a repeated `session_id` silently never fires
+        under that caller, so this mirrors the evaluator's naming exactly.
+        """
+
+        store = self.root / "uuid_profiles.json"
+        config = self.config.with_overrides(
+            enable_profile_memory=True, profile_memory_path=store
+        )
+        engine = CartographerEngine(self.catalog_path, config)
+        profile = {"preference_tags": ["fit"], "purchase_frequency": "3-4 prior purchases"}
+        for index in range(3):
+            engine.reset(f"public_{index:032x}", profile)
+            engine.respond(
+                f"public_{index:032x}",
+                "I'm looking for Men Shirts. A key requirement is: wool.",
+                1,
+                10,
+            )
+        engine.reset("public_final", profile)
+        remembered = engine.sessions["public_final"].user_profile
+        self.assertGreaterEqual(remembered["remembered_sessions"], 2)
+        self.assertIn("material", remembered["preference_tags"])
+        self.assertTrue(store.exists())
+
     def test_profile_memory_is_off_by_default_and_survives_a_broken_store(self) -> None:
         self.assertFalse(AgentConfig().enable_profile_memory)
         broken = self.root / "broken.json"

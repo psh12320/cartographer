@@ -9,7 +9,7 @@ from .clarification import ClarificationDecision, ClarificationPolicy
 from .config import AgentConfig
 from .dialog import DialogManager
 from .models import SessionState, TraceEvent
-from .profile_memory import ProfileMemory
+from .profile_memory import ProfileMemory, user_key as profile_user_key
 from .retrieval import HybridRetriever, diversify_browsing
 
 
@@ -42,24 +42,47 @@ class CartographerEngine:
         self.sessions: dict[str, SessionState] = {}
         self.traces: dict[str, list[TraceEvent]] = {}
         self._session_order: list[str] = []
+        self._distilled: set[str] = set()
 
     def reset(self, session_id: str, user_profile: dict) -> None:
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("session_id must be a non-empty string")
-        if session_id in self.sessions:
-            self._session_order.remove(session_id)
         profile = dict(user_profile or {}) if self.config.enable_profile else {}
+        identity = ""
         if self.profile_memory is not None:
-            previous = self.sessions.get(session_id)
-            if previous is not None:
-                self.profile_memory.distil(previous)
+            identity = profile_user_key(profile)
+            # Fold in every conversation that has finished but not yet been
+            # distilled. Callers normally allocate a fresh identifier per
+            # conversation, so keying this on `session_id` alone would mean
+            # nothing is ever distilled; `_distilled` keeps it exactly-once.
+            pending = [
+                identifier
+                for identifier in self._session_order
+                if identifier not in self._distilled and identifier in self.sessions
+            ]
+            for identifier in pending:
+                self.profile_memory.distil(self.sessions[identifier])
+                self._distilled.add(identifier)
+            if pending:
                 self.profile_memory.save()
             profile = self.profile_memory.recall(profile)
-        self.sessions[session_id] = SessionState(session_id=session_id, user_profile=profile)
+        if session_id in self.sessions:
+            self._session_order.remove(session_id)
+        self._distilled.discard(session_id)
+        self.sessions[session_id] = SessionState(
+            session_id=session_id, user_profile=profile, profile_key=identity
+        )
         self.traces[session_id] = []
         self._session_order.append(session_id)
         while len(self._session_order) > self.config.max_retained_sessions:
             expired = self._session_order.pop(0)
+            if self.profile_memory is not None and expired not in self._distilled:
+                # An evicted conversation is still a finished one.
+                expiring = self.sessions.get(expired)
+                if expiring is not None:
+                    self.profile_memory.distil(expiring)
+                    self.profile_memory.save()
+            self._distilled.discard(expired)
             self.sessions.pop(expired, None)
             self.traces.pop(expired, None)
 

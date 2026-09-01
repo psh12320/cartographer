@@ -34,6 +34,10 @@ class SessionState:
     declined_attributes: set[str] = field(default_factory=set)
     other_ask_count: int = 0
     deflected_attributes: set[str] = field(default_factory=set)
+    # Identity for long-term personalisation, taken from the caller's profile
+    # before any remembered preferences are merged in. Deriving it afterwards
+    # would let our own enrichment change the key and fragment the record.
+    profile_key: str = ""
     last_asked: str | None = None
     seen_products: set[str] = field(default_factory=set)
     override_shortlist: set[str] = field(default_factory=set)
