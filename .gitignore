@@ -29,3 +29,5 @@ docs/participant_release_checklist.md
 tests/test_5core_builder.py
 tests/test_organizer_pipeline.py
 *.log
+# Organizer-authored competition brief; not ours to redistribute.
+Shopping_Copilot_AI_Conversational_Search_and_Recommendations.pdf
